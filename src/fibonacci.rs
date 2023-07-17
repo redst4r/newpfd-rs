@@ -1,5 +1,18 @@
+//! Code for fibonacci encoding of integers
+//! 
+//! # Usage
+//! ```rust
+//! use newpfd::fibonacci::{fib_enc,FibonacciDecoder, bitslice_to_fibonacci};
+//! let mut encode1 = fib_enc(34) ;
+//! let mut encode2 = fib_enc(12);
+//! encode1.extend(encode2);
+//! 
+//! let f = FibonacciDecoder::new(&encode1);
+//! assert_eq!(f.map(bitslice_to_fibonacci).collect::<Vec<_>>(), vec![34,12])
+//! ```
 use bitvec::prelude::*;
 use itertools::izip;
+
 
 /// Iterative fibonacci.
 ///
@@ -24,7 +37,6 @@ impl Iterator for Fibonacci {
 fn iterative_fibonacci() -> Fibonacci {
     Fibonacci { curr: 1, next: 1 }
 }
-
 
 // not sure what the significance of those settings is
 // in busz, converting byte buffers to BitSlices seems to require u8;Msb01
@@ -62,17 +74,38 @@ pub fn bitslice_to_fibonacci(b: &MyBitSlice) -> u64{
     sum
 }
 
+/// Decoder for Fibonacci encoded integer sequences
+/// 
+/// Constructed from a bufffer (a binary sequence) which is gradually processed
+/// when iterating. The buffer remains unchanged, just the pointers into the buffer move
+/// 
+/// # Example
+/// ```rust
+/// use newpfd::fibonacci::FibonacciDecoder;
+/// use bitvec::prelude::{BitVec, Msb0};
+/// let buffer:BitVec<u8, Msb0> = BitVec::from_iter(vec![true, false, true, true, false, true, true]);
+/// let d = FibonacciDecoder::new(buffer.as_bitslice());
+/// for decoded in d {
+///     println!("{}", decoded);
+/// }
+/// ``` 
 #[derive(Debug)]
-pub struct MyFibDecoder <'a> {
+pub struct FibonacciDecoder <'a> {
     buffer: &'a MyBitSlice,
     current_pos: usize, // where we are at in the buffer (the last split), i.e the unprocessed part is buffer[current_pos..]
 }
 
-impl <'a> MyFibDecoder<'a> {
+impl <'a> FibonacciDecoder<'a> {
+    /// create a new fibonacci decoder for the given buffer
+    /// This leaves the buffer 
     pub fn new(buffer: &'a MyBitSlice) -> Self {
-        MyFibDecoder { buffer, current_pos:0}
+        FibonacciDecoder { buffer, current_pos:0}
     }
 
+    /// returns the buffer behind the last bit processed
+    /// Comes handy when the buffer contains data OTHER than fibonacci encoded 
+    /// data that needs to be processed externally
+    /// 
     pub fn get_remaining_buffer(&self) -> &'a MyBitSlice{
         &self.buffer[self.current_pos..]
     }
@@ -83,7 +116,7 @@ impl <'a> MyFibDecoder<'a> {
     }
 }
 
-impl <'a> Iterator for MyFibDecoder<'a> {
+impl <'a> Iterator for FibonacciDecoder<'a> {
     type Item=&'a MyBitSlice;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -112,14 +145,14 @@ impl <'a> Iterator for MyFibDecoder<'a> {
 /// Fibonacci encoding of a singele integer
 pub fn fib_enc(mut n: u64) -> BitVec<u8, Msb0>{
 
+    assert!(n>0, "n must be positive");
+    assert!(n<FIB64[FIB64.len()-1], "n must be smaller than max fib");
+
     let mut i = FIB64.len() - 1;
-    // let mut bits = Vec::new();
     let mut indices = Vec::new(); //indices of the bits that are set! will be sortet highest-lowest
     while n >0{
-        // println!("n={},i={}", n,i);
+        // println!("n={},i={}, F[i] {}", n,i, FIB64[i] );
         if FIB64[i] <= n {
-            // println!("Found n={n}, i={i}, =f[i]{}", FIB64[i] );
-            // bits.set(i, true);
             indices.push(i);
             n -= FIB64[i];
         }
@@ -128,7 +161,7 @@ pub fn fib_enc(mut n: u64) -> BitVec<u8, Msb0>{
         }
         i -= 1
     }
-    // println!("{:?}", indices);
+    println!("{:?}", indices);
     let max_ix = indices[0];
 
     //initialize all zero
@@ -151,30 +184,42 @@ pub fn fib_enc(mut n: u64) -> BitVec<u8, Msb0>{
 
 #[cfg(test)]
 mod test {
-    use crate::myfibonacci::{bitslice_to_fibonacci, MyFibDecoder, MyBitVector};
+    use crate::fibonacci::{bitslice_to_fibonacci, FibonacciDecoder, MyBitVector};
     use bitvec::prelude::*;
 
     use super::fib_enc;
 
     #[test]
-    fn test_fib_encode() {
+    fn test_fib_encode_5() {
         assert_eq!(
             fib_enc(5).iter().collect::<Vec<_>>(), 
             vec![false, false, false, true, true]
          );
-    
+    }
+    #[test]
+    fn test_fib_encode_1() {
         assert_eq!(
             fib_enc(1).iter().collect::<Vec<_>>(), 
             vec![true, true] 
         );
-
+    }
+    #[test]
+    fn test_fib_encode_14() {
         assert_eq!(
             fib_enc(14).iter().collect::<Vec<_>>(), 
             vec![true, false, false, false, false, true, true] 
         );
+    }
+    #[test]
+    #[should_panic(expected = "n must be positive")]
+    fn test_fib_encode_0() {
         fib_enc(0);
-
+    }
+    #[test]
+    #[should_panic(expected = "n must be smaller than max fib")]
+    fn test_fib_encode_u64max() {
         fib_enc(u64::MAX);
+
     }
 
 
@@ -235,7 +280,7 @@ fn test_bitslice_to_fibonacci_wrong_encoding(){
         let b: MyBitVector  = BitVec::from_iter(v.into_iter());
 
         // println!("full : {:?}", b);
-        let mut my = MyFibDecoder {buffer: b.as_bitslice(), current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b.as_bitslice(), current_pos:0};
 
         assert_eq!(
             my.next(), 
@@ -253,7 +298,7 @@ fn test_bitslice_to_fibonacci_wrong_encoding(){
         let b: MyBitVector  = BitVec::from_iter(v.into_iter());
 
         println!("full : {:?}", b);
-        let mut my = MyFibDecoder {buffer: b.as_bitslice(), current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b.as_bitslice(), current_pos:0};
 
         assert_eq!(
             my.next(), 
@@ -272,7 +317,7 @@ fn test_bitslice_to_fibonacci_wrong_encoding(){
         let b: MyBitVector  = BitVec::from_iter(v.into_iter());
 
         println!("full : {:?}", b);
-        let mut my = MyFibDecoder {buffer: b.as_bitslice(), current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b.as_bitslice(), current_pos:0};
 
         assert_eq!(
             my.next(), 
