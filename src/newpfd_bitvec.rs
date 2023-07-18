@@ -6,7 +6,7 @@
 use bitvec::{prelude as bv, field::BitField};
 // use fibonacci_codec::Encode;
 use itertools::{izip, Itertools};
-use crate::myfibonacci::{self, bitslice_to_fibonacci, fib_enc};
+use crate::fibonacci::{self, bitslice_to_fibonacci, fib_enc};
 // use crate::newpfd::NewPFDCodec;
 
 /// round an integer to the next bigger multiple
@@ -56,7 +56,7 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
 
     let mut buf_position = 0;
 
-    let mut fibdec = myfibonacci::MyFibDecoder::new(buf);
+    let mut fibdec = fibonacci::FibonacciDecoder::new(buf);
     let _b_bits = bitslice_to_fibonacci( fibdec.next().unwrap());
     let mut b_bits = _b_bits as usize;
 
@@ -124,7 +124,7 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
     let n_elements = blocksize;
     let mut decoded_primary: Vec<u64> = Vec::with_capacity(n_elements);
 
-    for i in 0..n_elements {
+    for _ in 0..n_elements {
         // println!("++++++++++++++Element {}/{}++++++++++++*", i+1, n_elements);
         // println!("{:?}", x);
         // split off an element into x
@@ -146,15 +146,8 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
     // puzzle it together
     for (i, highest_bits) in izip!(index, exceptions) {
         let lowest_bits = decoded_primary[i as usize];
-        // println!("high: {}", &display_u64_in_bits(highest_bits));
-        // println!("low:  {}", &display_u64_in_bits(lowest_bits));
-
         let el = (highest_bits << b_bits) | lowest_bits;
-        // println!("high_s{}", &display_u64_in_bits(highest_bits << b_bits));
-        // println!("merge {}", &display_u64_in_bits(el));
-
-        // println!("i:{i}, over: {highest_bits} -> {el}");
-        let pos = dbg!(i as usize);
+        let pos = i as usize;
         decoded_primary[pos] = el;
     }
 
@@ -186,7 +179,6 @@ pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocks
             elements.push(el);
         }
     }
-
     // trucate, as we retrieved a bunch of zeros from the last block
     elements.truncate(n_elements);
 
@@ -255,7 +247,8 @@ impl NewPFDBlock {
         } else {
             let mut sorted = input.iter().sorted();
             let minimum = *sorted.next().unwrap();
-            let the_element = sorted.nth(ix-1).unwrap();   //-1 since we took the first el out 
+            let mut the_element = *sorted.nth(ix-1).unwrap();   //-1 since we took the first el out 
+            the_element -= minimum; // since we're encoding relative to the minimum
             let n_bits = u64::BITS - the_element.leading_zeros(); 
             (minimum, n_bits)
         };
@@ -335,7 +328,7 @@ impl NewPFDBlock {
         let total_size = self.blocksize * self.b_bits;
         assert_eq!(total_size % 32, 0); 
         let to_pad = total_size - body.len();
-        for i in 0..to_pad {
+        for _ in 0..to_pad {
             body.push(false);
         }
         // println!("padded Body by {} bits to {}", to_pad, body.len());
@@ -356,11 +349,6 @@ impl NewPFDBlock {
         to_encode.extend(self.index_gaps.iter().map(|x| x+1)); //shifting the gaps +1
         to_encode.extend(self.exceptions.iter());
 
-
-            // let header_tmp = to_encode.fib_encode().unwrap();
-            // let mut header = bv::BitVec::from_iter(header_tmp.iter());
-    
-
         let mut header = bv::BitVec::new();
         for el in to_encode {
             let mut f = fib_enc(el);
@@ -369,7 +357,7 @@ impl NewPFDBlock {
 
         // yet again, this needs to be a mutliple of 32
         let to_pad =  round_to_multiple(header.len(), 32) - header.len();
-        for i in 0..to_pad {
+        for _ in 0..to_pad {
             header.push(false);
         }
         // println!("padded Header by {} bits to {}", to_pad, header.len());
@@ -381,28 +369,30 @@ impl NewPFDBlock {
 
 }
 
-
+/// NewPDF encoding 
+/// # Example
+/// ```rust
+/// 
+/// ```
 pub struct NewPFDCodec {
     blocksize: usize,
 }
 
 impl NewPFDCodec {
 
+    /// initialize NewPDF encoding with blocksize (usually 512)
     pub fn new(blocksize: usize) -> Self {
         NewPFDCodec { blocksize }
     }
 
+    /// encode a stream of u64s with NewPFD, returning a bitvector
     pub fn encode(&self, input_stream: impl Iterator<Item=u64>) -> bv::BitVec<u8, bv::Msb0> {
 
         let mut encoded_blocks : Vec<bv::BitVec<u8, bv::Msb0>> = Vec::new();
-        let mut block_counter = 0;
         // chunk the input into blocks
         for b in &input_stream.chunks(self.blocksize) {
 
             let block_elements: Vec<_> = b.collect();
-
-            // println!("Encoding block {block_counter} with {} elements: {:?}", block_elements.len(), block_elements);
-            block_counter+=1;
 
             let params = NewPFDBlock::get_encoding_params(&block_elements, 0.9);
             // println!("newpfd params: {params:?}");
@@ -410,7 +400,6 @@ impl NewPFDCodec {
             let enc_block = enc.encode(&block_elements, params.min_element as u64);
             encoded_blocks.push(enc_block);
         }
-        // println!("Concat blocks: {:?}", encoded_blocks);
         // concat
         let mut iii = encoded_blocks.into_iter();
         let mut merged_blocks = iii.next().unwrap();
@@ -442,7 +431,6 @@ impl NewPFDCodec {
                 elements.push(el);
             }
         }
-
         // trucate, as we retrieved a bunch of zeros from the last block
         elements.truncate(n_elements);
 
@@ -453,11 +441,8 @@ impl NewPFDCodec {
 
 #[cfg(test)]
 mod test {
-    // use crate::newpfd::NewPFDCodec;
     use bitvec::prelude as bv;
-    use crate::myfibonacci::fib_enc;
-
-    use super::decode;
+    use super::{decode, NewPFDBlock};
     #[test]
     fn test_larger_ecs_22() {
         let input = vec![264597, 760881, 216982, 203942, 218976];
@@ -474,9 +459,6 @@ mod test {
         
         assert_eq!(decoded, input);
     }
-
-    // use crate::newpfd::{decode_newpfdblock};
-    // use super::NewPFDBlock;
 
     #[test]
     fn test_encode_padding() {
@@ -539,9 +521,6 @@ mod test {
         let n = crate::newpfd_bitvec::NewPFDCodec::new(32);
         let input = vec![0_u64,1,0, 1];
         let encoded = n.encode(input.iter().cloned());
-        // println!("=============================");
-        // println!("=============================");
-        // println!("=============================");
         let (decoded,_) = n.decode(encoded, input.len());
 
         //same problem as above: truncated blocks contain trailing 0 eleemnts
@@ -557,9 +536,6 @@ mod test {
         let input = vec![0_u64,1,0, 1];
         let encoded = n.encode(input.iter().cloned());
 
-        // println!("=============================");
-        // println!("=============================");
-        // println!("=============================");
         let (decoded,_) = n.decode(encoded, input.len());
         assert_eq!(decoded, input);
     }
@@ -600,5 +576,13 @@ mod test {
         let (decoded, _) = n.decode(encoded, input.len());
         
         assert_eq!(decoded, input);
+    }
+
+
+    #[test]
+    fn test_param() {
+        let x = NewPFDBlock::get_encoding_params(&[10_u64, 10,10,10], 0.9);
+        assert_eq!(x.b_bits, 1);
+        assert_eq!(x.min_element, 10);
     }
 }

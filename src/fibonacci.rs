@@ -53,7 +53,7 @@ const FIB64: &[u64]= &[1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377,
 12586269025, 20365011074, 32951280099, 53316291173, 86267571272, 139583862445, 225851433717, 
 365435296162, 591286729879, 956722026041, 1548008755920, 2504730781961, 4052739537881, 
 6557470319842, 10610209857723, 17_167_680_177_565];
-// TODO calc all fib up to u64::MAX!
+// TODO calc all fib up to u64::MAX! -> no point, we cant encode that in 64bits anyway!
 
 /// convert a bitslice holding a single fibbonacci encoding into the numerical representation.
 /// Essentially assumes that the bitslice ends with ....11 and has no other occurance of 11
@@ -63,7 +63,9 @@ pub fn bitslice_to_fibonacci(b: &MyBitSlice) -> u64{
     // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
     // println!("{:?}", fib);
     // b.ends_with(&[true, true].into());
-    
+    if b.len() > 64 {
+        panic!("fib-codes cant be longer than 64bit, something is wrong!");
+    }
     // TODO make sure its a proper fib-encoding (no 11 except the end)
     let mut sum = 0;
     for (bit, f) in izip!(&b[..b.len()-1], FIB64) {
@@ -97,7 +99,7 @@ pub struct FibonacciDecoder <'a> {
 
 impl <'a> FibonacciDecoder<'a> {
     /// create a new fibonacci decoder for the given buffer
-    /// This leaves the buffer 
+    /// This leaves the buffer  unchanged, just moves a pointer (self.current_pos) in the buffer around
     pub fn new(buffer: &'a MyBitSlice) -> Self {
         FibonacciDecoder { buffer, current_pos:0}
     }
@@ -126,6 +128,10 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
         let current_slice = &self.buffer[self.current_pos..];
         // println!("currentslice {:?}", current_slice);
         for (idx, b) in current_slice.iter().enumerate() {
+
+            if idx > 64 {
+                panic!("fib-codes cant be longer than 64bit, something is wrong!");
+            }
             if *b & lastbit {
                 // found 11
                 // let the_hit = Some(&self.buffer[self.current_pos..self.current_pos+idx+1]);
@@ -161,7 +167,7 @@ pub fn fib_enc(mut n: u64) -> BitVec<u8, Msb0>{
         }
         i -= 1
     }
-    println!("{:?}", indices);
+    // println!("{:?}", indices);
     let max_ix = indices[0];
 
     //initialize all zero
@@ -263,6 +269,19 @@ mod test {
         assert_eq!(
             bitslice_to_fibonacci(&b),
             17
+        );
+    }
+
+    #[test]
+    fn test_max_decode() {
+        let mut v: Vec<bool> = [0_u8; 64].iter().map(|x|*x==1).collect();
+        v[62]=true;
+        v[63]=true;
+
+        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        assert_eq!(
+            bitslice_to_fibonacci(&b),
+            10610209857723 
         );
     }
 
