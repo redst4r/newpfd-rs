@@ -1,8 +1,5 @@
 //! NewPFD with bitvec backend (instead of the old, bit_vec crate)
 //! 
-//! 
-//! 
-
 use bitvec::{prelude as bv, field::BitField};
 // use fibonacci_codec::Encode;
 use itertools::{izip, Itertools};
@@ -97,7 +94,9 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
     // let delta_bits  = bits_before-bits_after;
     let delta_bits = fibdec.get_bits_processed();
     let padded_bits =  round_to_multiple(delta_bits, 32) - delta_bits;
-
+    // println!("#exceptions {}, delta_bits {delta_bits}", exceptions.len());
+    // println!("BS after ec len {}", &buf[buf_position + delta_bits + padded_bits..].len());
+    // println!("padded BS after ec{:?}", bitstream_to_string(&buf[buf_position+delta_bits..buf_position + delta_bits + padded_bits]));
     assert!(!buf[buf_position+delta_bits..buf_position + delta_bits + padded_bits].any());
     buf_position = buf_position + delta_bits + padded_bits;
 
@@ -185,9 +184,9 @@ pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocks
     (elements, pos)
 }
 
-/// just for debuffing purpose
+/// just for debugging purpose
 fn bitstream_to_string(buffer: &bv::BitSlice<u8, bv::Msb0>) -> String{
-    let s = buffer.iter().map(|x| if *x==true{"1"} else {"0"}).join("");
+    let s = buffer.iter().map(|x| if *x{"1"} else {"0"}).join("");
     s
 }
 
@@ -224,11 +223,11 @@ impl NewPFDBlock {
         let index_gaps : Vec<u64> = Vec::new();
         NewPFDBlock { 
             // blocksize: blocksize, 
-            b_bits: b_bits, 
+            b_bits, 
             blocksize,
             primary_buffer: pb, 
-            exceptions: exceptions, 
-            index_gaps: index_gaps 
+            exceptions, 
+            index_gaps 
         }
     }
 
@@ -264,7 +263,6 @@ impl NewPFDBlock {
 
     /// turns input data into the NewPFD storage format:
     /// represent items by b_bits, store any expections separately 
-    // pub fn from_data(input: &[u64], b_bits: usize) -> Self{
     pub fn encode(&mut self, input: &[u64], min_element: u64) -> bv::BitVec<u8, bv::Msb0> {
 
         assert!(input.len() <= self.blocksize);
@@ -307,7 +305,7 @@ impl NewPFDBlock {
             self.primary_buffer.push(cvec.to_bitvec());
         }
         // println!("encode: Primary {:?}", self.primary_buffer);
-        // println!("encode: b_bits {}", self.b_bits);
+        // println!("encode: b_bits {}, min: {}, #exc {} ", self.b_bits, min_element, self.exceptions.len());
         // println!("encode: min_el {}", min_element);
         // println!("encode: n_ex {}", self.exceptions.len());
         // println!("encode: Exceptions {:?}", self.exceptions);
@@ -316,8 +314,8 @@ impl NewPFDBlock {
         // merge the primary buffer into a single bitvec, the body of the block
         let mut body: bv::BitVec<u8, bv::Msb0> = bv::BitVec::with_capacity(self.b_bits+self.blocksize); // note that we need to pad with later
 
-        for mut b in self.primary_buffer.iter_mut() { 
-            body.append(&mut b);
+        for b in self.primary_buffer.iter_mut() { 
+            body.append(b);
         }
 
         // the primary buffer must fit into a multiple of u32!
@@ -397,7 +395,7 @@ impl NewPFDCodec {
             let params = NewPFDBlock::get_encoding_params(&block_elements, 0.9);
             // println!("newpfd params: {params:?}");
             let mut enc = NewPFDBlock::new(params.b_bits, self.blocksize);
-            let enc_block = enc.encode(&block_elements, params.min_element as u64);
+            let enc_block = enc.encode(&block_elements, params.min_element);
             encoded_blocks.push(enc_block);
         }
         // concat
@@ -416,11 +414,9 @@ impl NewPFDCodec {
     /// It'll always decode an entire block before checking if we have enough elements
     pub fn decode(&self, encoded: bv::BitVec<u8, bv::Msb0>, n_elements: usize) -> (Vec<u64>, bv::BitVec<u8, bv::Msb0> ){
         let mut elements: Vec<u64> = Vec::with_capacity(n_elements);
-        let mut i = 0;
         let mut encoded_pos = 0;
         while elements.len() < n_elements {
             // println!("Decoding newPFD Block {}: {:?}, len={}", i, encoded, encoded.len());
-            i+=1;
             // each call shortens wth encoded BitVec
             let (els, bits_processed) = decode_newpfdblock(&encoded[encoded_pos..], self.blocksize);
             encoded_pos += bits_processed;

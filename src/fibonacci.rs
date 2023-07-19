@@ -69,7 +69,7 @@ pub fn bitslice_to_fibonacci(b: &MyBitSlice) -> u64{
     // TODO make sure its a proper fib-encoding (no 11 except the end)
     let mut sum = 0;
     for (bit, f) in izip!(&b[..b.len()-1], FIB64) {
-        if *bit == true {
+        if *bit {
             sum+=f;
         }
     }
@@ -107,7 +107,6 @@ impl <'a> FibonacciDecoder<'a> {
     /// returns the buffer behind the last bit processed
     /// Comes handy when the buffer contains data OTHER than fibonacci encoded 
     /// data that needs to be processed externally
-    /// 
     pub fn get_remaining_buffer(&self) -> &'a MyBitSlice{
         &self.buffer[self.current_pos..]
     }
@@ -148,8 +147,8 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
     }
 }
 
-/// Fibonacci encoding of a singele integer
-pub fn fib_enc(mut n: u64) -> BitVec<u8, Msb0>{
+/// Fibonacci encoding of a single integer
+pub fn fib_enc(mut n: u64) -> MyBitVector{
 
     assert!(n>0, "n must be positive");
     assert!(n<FIB64[FIB64.len()-1], "n must be smaller than max fib");
@@ -167,20 +166,14 @@ pub fn fib_enc(mut n: u64) -> BitVec<u8, Msb0>{
         }
         i -= 1
     }
-    // println!("{:?}", indices);
     let max_ix = indices[0];
 
-    //initialize all zero
-    let mut bits: BitVec<u8, Msb0> = BitVec::with_capacity(max_ix+2); //on extra for the terminator
-    for _ in 0..max_ix+1 {
-        bits.push(false);
-    }
+    let mut bits = MyBitVector::repeat(false, max_ix+1);
+
     // set all recoded bits
-    // create a bitstring from the indices
-    for i in indices { // now going from loest to higest
+    for i in indices {
         bits.set(i, true);
     }
-
     // add a final 1 to get the terminator
     bits.push(true);
 
