@@ -54,11 +54,11 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
     let mut buf_position = 0;
 
     let mut fibdec = fibonacci::FibonacciDecoder::new(buf);
-    let _b_bits = bitslice_to_fibonacci( fibdec.next().unwrap());
+    let _b_bits = fibdec.next().unwrap();
     let mut b_bits = _b_bits as usize;
 
-    let mut min_el = bitslice_to_fibonacci( fibdec.next().unwrap());
-    let mut n_exceptions = bitslice_to_fibonacci( fibdec.next().unwrap());
+    let mut min_el = fibdec.next().unwrap();
+    let mut n_exceptions = fibdec.next().unwrap();
 
     b_bits -= 1;
     min_el -= 1;
@@ -69,14 +69,14 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
     // println!("Decoding gaps");
     let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
     for _ in 0..n_exceptions { 
-        let ix = bitslice_to_fibonacci( fibdec.next().unwrap()) - 1; // shift in encode
+        let ix =  fibdec.next().unwrap() - 1; // shift in encode
         index_gaps.push(ix);
     }
 
     // println!("Decoding exceptions");
     let mut exceptions = Vec::with_capacity(n_exceptions as usize);
     for _ in 0..n_exceptions { 
-        let ex = bitslice_to_fibonacci( fibdec.next().unwrap());
+        let ex = fibdec.next().unwrap();
         exceptions.push(ex);
     }
 
@@ -159,6 +159,21 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
 }
 
 /// Decode a NewPFD-encoded buffer, containing `n_elements`
+/// 
+/// /// # Example
+/// ```rust
+/// # use bitvec::prelude as bv;
+/// # use newpfd::newpfd_bitvec::{encode, decode};
+/// let data = vec![1,2,3,4,5];
+/// let blocksize = 32;
+/// let (encoded, n_elements) = encode(data.iter().cloned(), 32);
+/// 
+/// let (decoded, bits_processed) = decode(&encoded, n_elements, blocksize);
+/// 
+/// assert_eq!(data, decoded);
+/// assert_eq!(encoded.len(), bits_processed);
+/// ``` 
+/// 
 pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
 
     let mut pos = 0;
@@ -184,11 +199,51 @@ pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocks
     (elements, pos)
 }
 
-/// just for debugging purpose
-fn bitstream_to_string(buffer: &bv::BitSlice<u8, bv::Msb0>) -> String{
-    let s = buffer.iter().map(|x| if *x{"1"} else {"0"}).join("");
-    s
+/// encode data using NewPFD, 
+/// 
+/// # Parameters
+/// * input_stream: Any iterator yielding u64
+/// * blocksize: Number of elements going into a single NewPFD block (which gets compressed with b_bits and exceptions).
+/// Must be a mutliple of 32!
+/// 
+/// # Example
+/// ```rust
+/// # use bitvec::prelude as bv;
+/// # use newpfd::newpfd_bitvec::encode;
+/// let data = vec![1,2,3,4,5];
+/// let (encoded, _) = encode(data.into_iter(), 32);
+/// ``` 
+pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (bv::BitVec<u8, bv::Msb0>, usize) {
+
+    let mut n_elements = 0;
+    let mut encoded_blocks : Vec<bv::BitVec<u8, bv::Msb0>> = Vec::new();
+    // chunk the input into blocks
+    for b in &input_stream.chunks(blocksize) {
+
+        let block_elements: Vec<_> = b.collect();
+        n_elements +=  block_elements.len();
+
+        let params = NewPFDBlock::get_encoding_params(&block_elements, 0.9);
+        // println!("newpfd params: {params:?}");
+        let mut enc = NewPFDBlock::new(params.b_bits, blocksize);
+        let enc_block = enc.encode(&block_elements, params.min_element);
+        encoded_blocks.push(enc_block);
+    }
+    // concat
+    let mut iii = encoded_blocks.into_iter();
+    let mut merged_blocks = iii.next().unwrap();
+    for mut b in iii {
+        merged_blocks.append(&mut b);
+    }
+    (merged_blocks, n_elements)
 }
+
+
+// /// just for debugging purpose
+// fn bitstream_to_string(buffer: &bv::BitSlice<u8, bv::Msb0>) -> String{
+//     let s = buffer.iter().map(|x| if *x{"1"} else {"0"}).join("");
+//     s
+// }
 
 /// Data Stored in a single block of the NewPFD format
 /// 
@@ -367,73 +422,6 @@ impl NewPFDBlock {
 
 }
 
-/// NewPDF encoding 
-/// # Example
-/// ```rust
-/// 
-/// ```
-pub struct NewPFDCodec {
-    blocksize: usize,
-}
-
-impl NewPFDCodec {
-
-    /// initialize NewPDF encoding with blocksize (usually 512)
-    pub fn new(blocksize: usize) -> Self {
-        NewPFDCodec { blocksize }
-    }
-
-    /// encode a stream of u64s with NewPFD, returning a bitvector
-    pub fn encode(&self, input_stream: impl Iterator<Item=u64>) -> bv::BitVec<u8, bv::Msb0> {
-
-        let mut encoded_blocks : Vec<bv::BitVec<u8, bv::Msb0>> = Vec::new();
-        // chunk the input into blocks
-        for b in &input_stream.chunks(self.blocksize) {
-
-            let block_elements: Vec<_> = b.collect();
-
-            let params = NewPFDBlock::get_encoding_params(&block_elements, 0.9);
-            // println!("newpfd params: {params:?}");
-            let mut enc = NewPFDBlock::new(params.b_bits, self.blocksize);
-            let enc_block = enc.encode(&block_elements, params.min_element);
-            encoded_blocks.push(enc_block);
-        }
-        // concat
-        let mut iii = encoded_blocks.into_iter();
-        let mut merged_blocks = iii.next().unwrap();
-        for mut b in iii {
-            merged_blocks.append(&mut b);
-        }
-        merged_blocks
-    }
-
-    /// decode the newpfd encoding
-    /// due to the zero padding of truncated blocks, the format itself has no info
-    /// about how many elements are stored. Hence `n_elements` needs to be supplied
-    /// 
-    /// It'll always decode an entire block before checking if we have enough elements
-    pub fn decode(&self, encoded: bv::BitVec<u8, bv::Msb0>, n_elements: usize) -> (Vec<u64>, bv::BitVec<u8, bv::Msb0> ){
-        let mut elements: Vec<u64> = Vec::with_capacity(n_elements);
-        let mut encoded_pos = 0;
-        while elements.len() < n_elements {
-            // println!("Decoding newPFD Block {}: {:?}, len={}", i, encoded, encoded.len());
-            // each call shortens wth encoded BitVec
-            let (els, bits_processed) = decode_newpfdblock(&encoded[encoded_pos..], self.blocksize);
-            encoded_pos += bits_processed;
-            // println!("----remaining size {}, {:?}", encoded.len(), encoded);
-            // println!("Decoded {} elements", els.len());
-
-            for el in els {
-                elements.push(el);
-            }
-        }
-        // trucate, as we retrieved a bunch of zeros from the last block
-        elements.truncate(n_elements);
-
-        (elements,encoded)
-    }
-}
-
 
 #[cfg(test)]
 mod test {
@@ -442,12 +430,8 @@ mod test {
     #[test]
     fn test_larger_ecs_22() {
         let input = vec![264597, 760881, 216982, 203942, 218976];
-        
-        let n = crate::newpfd_bitvec::NewPFDCodec::new(32);
-
-        // println!("{:?}", NewPFDBlock::get_encoding_params(&input, 0.9));
-        let encoded = n.encode(input.iter().cloned());
-        // println!("Encoded:\n{:?}", encoded);
+        let (encoded, n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
+        assert_eq!(n_el, input.len());
         let encoded_bv: bv::BitVec<u8, bv::Msb0> = bv::BitVec::from_iter(encoded.iter());
         // println!("Encoded bv:\n{}", bitstream_to_string(&encoded_bv));
 
@@ -466,23 +450,32 @@ mod test {
         // assert_eq!(b.len(), n.blocksize * n.b_bits); // only applies to body
     }
 
-    #[test]
-    fn test_params() {
-        let input = vec![0,10, 100, 1000];
-        let params = crate::newpfd_bitvec::NewPFDBlock::get_encoding_params(&input, 0.75);
-        assert_eq!(params.min_element, 0);
-        assert_eq!(params.b_bits, 7);
+    mod params {
+        use crate::newpfd_bitvec::NewPFDBlock;
+        #[test]
+        fn test_params() {
+            let input = vec![0,10, 100, 1000];
+            let params = crate::newpfd_bitvec::NewPFDBlock::get_encoding_params(&input, 0.75);
+            assert_eq!(params.min_element, 0);
+            assert_eq!(params.b_bits, 7);
+        }
+
+        #[test]
+        fn test_params_min_el() {
+            let input = vec![1,10, 100, 1000];
+            let params = crate::newpfd_bitvec::NewPFDBlock::get_encoding_params(&input, 0.75);
+            assert_eq!(params.min_element, 1);
+            assert_eq!(params.b_bits, 7);
+        }
+
+        #[test]
+        fn test_param() {
+            let x = NewPFDBlock::get_encoding_params(&[10_u64, 10,10,10], 0.9);
+            assert_eq!(x.b_bits, 1);
+            assert_eq!(x.min_element, 10);
+        }
     }
-
-    #[test]
-    fn test_params_min_el() {
-        let input = vec![1,10, 100, 1000];
-        let params = crate::newpfd_bitvec::NewPFDBlock::get_encoding_params(&input, 0.75);
-        assert_eq!(params.min_element, 1);
-        assert_eq!(params.b_bits, 7);
-    }
-
-
+ 
     #[test]
     fn test_encode_decode_less_elements_than_blocksize() {
         let blocksize = 32; 
@@ -514,49 +507,41 @@ mod test {
 
     #[test]
     fn test_newpfd_codec_encode_decode() {
-        let n = crate::newpfd_bitvec::NewPFDCodec::new(32);
         let input = vec![0_u64,1,0, 1];
-        let encoded = n.encode(input.iter().cloned());
-        let (decoded,_) = n.decode(encoded, input.len());
+        let (encoded, n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
+        assert_eq!(n_el, input.len());
 
+        let (decoded,_) = decode(&encoded, input.len(), 32);
         //same problem as above: truncated blocks contain trailing 0 eleemnts
         assert_eq!(decoded, input);
     }
-
 
     // #[test]
     // not relevant any more, forxing blocksize as a multipel of 32
     fn test_newpfd_codec_encode_decode_blocksize1() {
         // blocksize==1 exposes some edge cases, like a single 0bit in the block
-        let n = crate::newpfd_bitvec::NewPFDCodec::new(1);
         let input = vec![0_u64,1,0, 1];
-        let encoded = n.encode(input.iter().cloned());
-
-        let (decoded,_) = n.decode(encoded, input.len());
+        let (encoded, _n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
+        let (decoded,_) = decode(&encoded, input.len(), 32);
         assert_eq!(decoded, input);
     }
 
     #[test]
     fn test_newpfd_codec_encode_decode_nonzero_min_el() {
-        let n = crate::newpfd_bitvec::NewPFDCodec::new(32);
         let input = vec![1_u64,2,2, 1];
-        let encoded = n.encode(input.iter().cloned());
-        let (decoded,_) = n.decode(encoded, input.len());
+        let (encoded, _n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
+        let (decoded,_) = decode(&encoded, input.len(), 32);
         assert_eq!(decoded[..input.len()], input);
-
         // all the articical zero elements are now 1, since they get shifted
         assert!(decoded[input.len()..].iter().all(|&b|b==1))
     }
     #[test]
     fn test_newpfd_codec_encode_decode_multiblock() {
         // firsst block is encodble with5 bits, second with 6
-        let n = crate::newpfd_bitvec::NewPFDCodec::new(32);
         let input: Vec<u64> = (0..50).map(|x|x).collect();
-        let encoded = n.encode(input.iter().cloned());
-        let (decoded, _) = n.decode(encoded, input.len());
-        
+        let (encoded, _n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
+        let (decoded, _) = decode(&encoded, input.len(), 32);
         assert_eq!(decoded, input);
-
         // all the articical zero elements are now 132, since they get shifted to the min of the second block
         assert!(decoded[input.len()..].iter().all(|&b|b==32))
     }
@@ -564,21 +549,9 @@ mod test {
     #[test]
     fn test_larger_ecs() {
         let input = vec![264597, 760881, 216982, 203942, 218976];
-        // let input = vec![1,2,3,4,5];
-        let n = crate::newpfd_bitvec::NewPFDCodec::new(32);
-
         println!("{:?}", crate::newpfd_bitvec::NewPFDBlock::get_encoding_params(&input, 0.9));
-        let encoded = n.encode(input.iter().cloned());
-        let (decoded, _) = n.decode(encoded, input.len());
-        
+        let (encoded, _n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
+        let (decoded, _) = decode(&encoded, input.len(), 32);
         assert_eq!(decoded, input);
-    }
-
-
-    #[test]
-    fn test_param() {
-        let x = NewPFDBlock::get_encoding_params(&[10_u64, 10,10,10], 0.9);
-        assert_eq!(x.b_bits, 1);
-        assert_eq!(x.min_element, 10);
     }
 }

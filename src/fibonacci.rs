@@ -8,7 +8,7 @@
 //! encode1.extend(encode2);
 //! 
 //! let f = FibonacciDecoder::new(&encode1);
-//! assert_eq!(f.map(bitslice_to_fibonacci).collect::<Vec<_>>(), vec![34,12])
+//! assert_eq!(f.collect::<Vec<_>>(), vec![34,12])
 //! ```
 use bitvec::prelude::*;
 use itertools::izip;
@@ -118,7 +118,7 @@ impl <'a> FibonacciDecoder<'a> {
 }
 
 impl <'a> Iterator for FibonacciDecoder<'a> {
-    type Item=&'a MyBitSlice;
+    type Item=u64;
 
     fn next(&mut self) -> Option<Self::Item> {
         // let pos = self.current_pos;
@@ -138,8 +138,8 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
                 self.current_pos += idx; 
                 self.current_pos += 1;
 
-                // let decoded = bitslice_to_fibonacci(the_hit);
-                return Some(the_hit);
+                let decoded = bitslice_to_fibonacci(the_hit);
+                return Some(decoded);
             }
             lastbit = *b
         }
@@ -296,7 +296,7 @@ fn test_bitslice_to_fibonacci_wrong_encoding(){
 
         assert_eq!(
             my.next(), 
-            Some(fib_enc(3).as_bitslice())
+            Some(3)
         );
         assert_eq!(
             my.next(), 
@@ -314,11 +314,11 @@ fn test_bitslice_to_fibonacci_wrong_encoding(){
 
         assert_eq!(
             my.next(), 
-            Some(fib_enc(3).as_bitslice())
+            Some(3)
         );
         assert_eq!(
             my.next(), 
-            Some(fib_enc(1).as_bitslice())
+            Some(1)
 
         );
     }
