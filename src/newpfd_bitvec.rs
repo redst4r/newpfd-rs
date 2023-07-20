@@ -3,7 +3,7 @@
 use bitvec::{prelude as bv, field::BitField};
 // use fibonacci_codec::Encode;
 use itertools::{izip, Itertools};
-use crate::fibonacci::{self, bitslice_to_fibonacci, fib_enc};
+use crate::fibonacci::{self, fib_enc};
 // use crate::newpfd::NewPFDCodec;
 
 /// round an integer to the next bigger multiple
@@ -158,9 +158,19 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
     (decoded_final, buf_position+body_pos)
 }
 
-/// Decode a NewPFD-encoded buffer, containing `n_elements`
+/// Decode a NewPFD-encoded buffer, containing `n_elements`. 
+/// Due to limitations of the format, we can't know (internally) how many elements were stored, 
+/// hence `n_elements` needs to be specified
 /// 
-/// /// # Example
+/// # Parameters
+/// * `newpfd_buf`: A BitSlice containing NewPFD encoded data
+/// * `n_elements`: number of elements to decode
+/// * `blocksize`: Blocksize used to encode the buffer
+/// # Returns:
+/// * A `Vec<u64>` of decoded values (len()==n_elements)
+/// * the number of bits that were processed in the input buffer. 
+///   Useful if one wants to use the buffer afterwards (in case theres other data in there)
+/// # Example
 /// ```rust
 /// # use bitvec::prelude as bv;
 /// # use newpfd::newpfd_bitvec::{encode, decode};
@@ -169,6 +179,9 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
 /// let (encoded, n_elements) = encode(data.iter().cloned(), 32);
 /// 
 /// let (decoded, bits_processed) = decode(&encoded, n_elements, blocksize);
+///
+/// // other data (if there were any)
+/// let remaining_buffer = &encoded[bits_processed..];
 /// 
 /// assert_eq!(data, decoded);
 /// assert_eq!(encoded.len(), bits_processed);
@@ -202,10 +215,13 @@ pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocks
 /// encode data using NewPFD, 
 /// 
 /// # Parameters
-/// * input_stream: Any iterator yielding u64
-/// * blocksize: Number of elements going into a single NewPFD block (which gets compressed with b_bits and exceptions).
+/// * `input_stream`: Any iterator yielding u64
+/// * `blocksize`: Number of elements going into a single NewPFD block (which gets compressed with b_bits and exceptions).
 /// Must be a mutliple of 32!
 /// 
+/// # Returns
+/// * a BitVec containing the NewPFD encoded data
+/// * the number of elements that were encoded (size of the input iterator)
 /// # Example
 /// ```rust
 /// # use bitvec::prelude as bv;
@@ -426,7 +442,7 @@ impl NewPFDBlock {
 #[cfg(test)]
 mod test {
     use bitvec::prelude as bv;
-    use super::{decode, NewPFDBlock};
+    use super::decode;
     #[test]
     fn test_larger_ecs_22() {
         let input = vec![264597, 760881, 216982, 203942, 218976];
@@ -481,8 +497,7 @@ mod test {
         let blocksize = 32; 
         let mut n = crate::newpfd_bitvec::NewPFDBlock::new(4,  blocksize);
         let input = vec![0,1,2,16, 1, 17, 34, 1];
-        let mut encoded = n.encode(&input, 0);
-
+        let encoded = n.encode(&input, 0);
 
         // println!("Enc length {}", encoded.len());
         // println!("Plain length {}", input.len()*64);
@@ -518,6 +533,7 @@ mod test {
 
     // #[test]
     // not relevant any more, forxing blocksize as a multipel of 32
+    #[allow(dead_code)]
     fn test_newpfd_codec_encode_decode_blocksize1() {
         // blocksize==1 exposes some edge cases, like a single 0bit in the block
         let input = vec![0_u64,1,0, 1];

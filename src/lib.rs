@@ -1,4 +1,4 @@
-//! Crate implementing NewPFD (a variant of the patched ) compression of integers.
+//! Crate implementing NewPFD (a variant of PForDelta, aka Patched Frame Of Reference Delta) compression of integers.
 //! 
 //! See [Inverted index compression and query processing with optimized document ordering](https://dl.acm.org/doi/10.1145/1526709.1526764) for the original publication.
 //! 
@@ -9,13 +9,14 @@
 //! For elements that dont fit, store the lower `bit_width` bits in the primary buffer, encode and store the excess bits separately (Fibonacci encoding)
 //! 
 //! # Note
-//! The decoder is written in such a way that it doesn't *consume* the compressed data.
+//! * The decoder is written in such a way that it doesn't *consume* the compressed data.
 //! Rather it takes a refence to it, reads in the specific amount of elements and returns the number of bits processed.
-//! 
 //! This allows for complex formats where NewPFD is only a small part,
 //! and after the NewPFD section, theres other data that has to be processed differently.
 //! In particular, cafter alling `let (decompressed_data, bits_processed) = decode(&compressed_data, data.len(), blocksize);`
 //! you can get hold of the remaining bitstream via `compressed_data[bits_processed..]`
+//! 
+//! * This compression **does not** use delta compression internally. If you need that, apply it before feeding the data into `encode()`.
 //! 
 //! # Example
 //! ```rust
@@ -32,6 +33,28 @@
 //! assert_eq!(data, decompressed_data);
 //! assert_eq!(compressed_data.len(), bits_processed); // the entire bitstream was consumed
 //! ```
+//! 
+//! # Memory layout
+//! 
+//! Header: 
+//! - fib([b_bits, min_element, #exceptions])
+//! - Exceptions
+//! - exception indices (delta encoded)
+//! 
+//! Body:
+//! - |b_bits|b_bits|b_bits|b_bits|b_bits|b_bits|...|
+//! 
+//! # Performance
+//! The library is currently *NOT* optimized for performance! 
+//! In particular, the Fibbonaci encoding/decoding could probably be made faster.
+//! 
+//! However, here's what we get in terms of encoding and decoding 1Mio 1byte integers (0..255):
+//! ```bash,no_run     
+//! mean +/- std
+//! Encoding: [554.66 ms 566.34 ms 578.47 ms]
+//! Decoding: [18.931 ms 19.214 ms 19.523 ms]
+//! ```
+//! Decoding seems to be vastly faster!
 //! 
 #![deny(missing_docs)]
 pub mod newpfd_bitvec;

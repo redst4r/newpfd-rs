@@ -10,3 +10,11 @@ bitvec="1"
 itertools="0.10.5"
 fibonacci_codec="0.2"
 bit-vec="0.6"
+rand = "0.8"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "my_benchmark"
+harness = false
