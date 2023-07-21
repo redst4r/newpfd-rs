@@ -1,5 +1,7 @@
 //! NewPFD with bitvec backend (instead of the old, bit_vec crate)
 //! 
+use std::thread::panicking;
+
 use bitvec::{prelude as bv, field::BitField};
 // use fibonacci_codec::Encode;
 use itertools::{izip, Itertools};
@@ -260,6 +262,39 @@ pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (bv::B
 //     let s = buffer.iter().map(|x| if *x{"1"} else {"0"}).join("");
 //     s
 // }
+#[derive(Debug)]
+struct PrimaryBuffer {
+    buffer: bv::BitVec<u8, bv::Msb0>,
+    b_bits: usize,
+    blocksize: usize,
+    n_elements: usize,  // how many eleements stored currently (could be read off from the position, but easier this way)
+    position: usize,
+    
+    // = 
+}
+impl PrimaryBuffer {
+    pub fn new(b_bits: usize, blocksize: usize) -> Self {
+        let buffer = bv::BitVec::repeat(false, b_bits*blocksize);
+        PrimaryBuffer {
+            buffer,
+            b_bits,
+            blocksize,
+            n_elements: 0,
+            position: 0
+        }
+    }
+    pub fn add_element(&mut self, el: u64) {
+        // doesnt check if b_bits are enough, just stores the lowest b_bits
+
+        // if self.position >= self.buffer.len() {
+        if self.n_elements >= self.blocksize {
+            panic!("storing too many elements")
+        }
+        self.buffer[self.position..self.position+self.b_bits].store_be::<u64>(el); //store_be chops of higher bits
+        self.position+=self.b_bits;
+        self.n_elements+=1;
+    }
+}
 
 /// Data Stored in a single block of the NewPFD format
 /// 
@@ -280,7 +315,7 @@ struct NewPFDBlock {
     // blocksize: usize,
     b_bits: usize,  // The number of bits each num in `pfd_block` is represented with.
     blocksize: usize, //usually 512, needs to be a multiple of 32
-    primary_buffer: Vec<bv::BitVec<u8, bv::Msb0>>,
+    // primary_buffer: Vec<bv::BitVec<u8, bv::Msb0>>,
     exceptions: Vec<u64>,
     index_gaps : Vec<u64>
 }
@@ -289,14 +324,14 @@ impl NewPFDBlock {
     pub fn new(b_bits: usize, blocksize: usize) -> Self {
 
         assert_eq!(blocksize % 32, 0, "Blocksize must be mutiple of 32");
-        let pb = Vec::with_capacity(blocksize);
+        // let pb = Vec::with_capacity(blocksize);
         let exceptions: Vec<u64> = Vec::new();
         let index_gaps : Vec<u64> = Vec::new();
         NewPFDBlock { 
             // blocksize: blocksize, 
             b_bits, 
             blocksize,
-            primary_buffer: pb, 
+            // primary_buffer: pb, 
             exceptions, 
             index_gaps 
         }
@@ -344,6 +379,7 @@ impl NewPFDBlock {
         // index of the last exception we came across
         let mut last_ex_idx = 0;
 
+        let mut prim_buf = PrimaryBuffer::new(self.b_bits, self.blocksize);
         // go over all elements, split each element into low bits (fitting into the primary)
         // and the high bits, which go into the exceptions
         for (i,x) in input.iter().enumerate() {
@@ -364,16 +400,8 @@ impl NewPFDBlock {
             }
 
             // put the rest into the primary buffer
-            // turn the element to be stored into a bitvec (it'll be bigger than intended, but we'll chop it)
-            // BigEndian: least significant BYTES are on the right!
-
-            let bvec = &bv::BitVec::from_slice(&diff.to_be_bytes());
-            let (zero, cvec) = bvec.split_at(bvec.len()-self.b_bits);
-            
-            assert_eq!(cvec.len(), self.b_bits);
-            assert!(!zero.any()); // the chopped off part should be 0
-            // println!("{:?}", cvec);
-            self.primary_buffer.push(cvec.to_bitvec());
+            // excess bits are removed automatically!
+            prim_buf.add_element(diff);
         }
         // println!("encode: Primary {:?}", self.primary_buffer);
         // println!("encode: b_bits {}, min: {}, #exc {} ", self.b_bits, min_element, self.exceptions.len());
@@ -382,26 +410,11 @@ impl NewPFDBlock {
         // println!("encode: Exceptions {:?}", self.exceptions);
         // println!("encode: Gaps: {:?}", self.index_gaps);
 
-        // merge the primary buffer into a single bitvec, the body of the block
-        let mut body: bv::BitVec<u8, bv::Msb0> = bv::BitVec::with_capacity(self.b_bits+self.blocksize); // note that we need to pad with later
+        let body = prim_buf.buffer;
 
-        for b in self.primary_buffer.iter_mut() { 
-            body.append(b);
-        }
-
-        // the primary buffer must fit into a multiple of u32!
-        // if the block is fully occupied (512 el) this is naturally the case
-        // but for partial blocks, we need to pad
-        // Actually, bustools implements it as such that primary buf is ALWAYS
-        // 512 * b_bits in size (no matter how many elements)
-        let total_size = self.blocksize * self.b_bits;
-        assert_eq!(total_size % 32, 0); 
-        let to_pad = total_size - body.len();
-        for _ in 0..to_pad {
-            body.push(false);
-        }
-        // println!("padded Body by {} bits to {}", to_pad, body.len());
-        // println!("{:?}", body);
+        // the primary buffer must fit into a multiple of u32! the format demands it
+        //TODO this is already true for the prim_buf implementation
+        assert_eq!(body.len() % 32, 0); 
 
         // now, put the "BlockHeader"  in front of the merged_primary buffer we store via fibonacci encoding:
         // 1. b_bits
@@ -442,7 +455,7 @@ impl NewPFDBlock {
 #[cfg(test)]
 mod test {
     use bitvec::prelude as bv;
-    use super::decode;
+    use super::{decode, PrimaryBuffer};
     #[test]
     fn test_larger_ecs_22() {
         let input = vec![264597, 760881, 216982, 203942, 218976];
@@ -569,5 +582,37 @@ mod test {
         let (encoded, _n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
         let (decoded, _) = decode(&encoded, input.len(), 32);
         assert_eq!(decoded, input);
+    }
+
+    #[test]
+    fn test_primary() {
+        let mut p = PrimaryBuffer::new(2, 3);
+        p.add_element(3); // 11 in binary
+        p.add_element(0); // 00 in binary
+        p.add_element(3); // 11 in binary
+        assert_eq!(
+            p.buffer.iter().collect::<Vec<_>>(), 
+            vec![true, true, false, false, true, true] 
+        );
+    }
+    #[test]
+    fn test_primary_overflow() {
+        let mut p = PrimaryBuffer::new(2, 3);
+        p.add_element(5); // 101 in binary
+
+        // should onyl store the lower two bits
+        assert_eq!(
+            p.buffer.iter().collect::<Vec<_>>(), 
+            vec![false, true, false, false, false, false] 
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "storing too many elements")]
+    fn test_primary_too_many_el() {
+        let mut p = PrimaryBuffer::new(2, 2);
+        p.add_element(1); 
+        p.add_element(1); 
+        p.add_element(1); // excess element
     }
 }
