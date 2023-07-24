@@ -254,12 +254,6 @@ impl NewPFDBlock {
 
 }
 
-// // turn a bitvector (64 elements) into a u64
-pub fn bits64_to_u64(x: BitVec) -> u64{
-    assert_eq!(x.len(), 64);
-    u64::from_le_bytes(x.to_bytes()[..8].try_into().unwrap())
-}
-
 /// elements in the primary buffer are stored using b_bits
 /// decode these as u64s
 /// #TODO some mess with endian-ness

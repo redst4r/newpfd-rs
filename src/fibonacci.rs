@@ -48,7 +48,8 @@ type MyBitVector = BitVec<u8, Msb0>;
 
 // let v: Vec<_> = iterative_fibonacci().take(65 - 1).collect();
 // println!("{:?}", v);
-const FIB64: &[u64]= &[1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 
+/// All fibonacci numbers up to 64bit
+pub const FIB64: &[u64]= &[1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 
 610, 987, 1597, 2584, 4181, 6765, 10946, 17711, 28657, 46368, 75025, 
 121393, 196418, 317811, 514229, 832040, 1346269, 2178309, 3524578, 5702887, 
 9227465, 14930352, 24157817, 39088169, 63245986, 102334155, 165580141, 267914296, 
@@ -190,14 +191,142 @@ pub fn fib_enc(mut n: u64) -> MyBitVector{
     bits
 }
 
+/// Encode multiple integers into a bitvector via Fibonacci Encoding
+pub fn fib_enc_multiple(data: &[u64]) -> MyBitVector {
+    let mut acc = MyBitVector::new();
+
+    for &x in data {
+        let mut b = fib_enc(x);
+        acc.append(&mut b);
+    }
+    acc
+}
+
+/// Slightly faster (2x) encoding of multiple integers into a bitvector via Fibonacci Encoding
+pub fn fib_enc_multiple_fast(data: &[u64]) -> MyBitVector{
+    let mut overall: BitVec<u8, Msb0> = BitVec::new();
+
+    for &x in data {
+        bits_from_table(x, FIB64, &mut overall).unwrap();
+    }
+    overall
+}
+
+
+use std::fmt::Debug;
+use num::CheckedSub;
+#[derive(Debug, PartialEq)]
+
+/// Hijacked from https://github.com/antifuchs/fibonacci_codec
+pub enum EncodeError<T>
+where
+    T: Debug + Send + Sync + 'static,
+{
+    /// Indicates an attempt to encode the number `0`, which can't be
+    /// represented in fibonacci encoding.
+    ValueTooSmall(T),
+
+    /// A bug in fibonacci_codec in which encoding the contained
+    /// number resulted in an attempt to subtract a larger fibonacci
+    /// number than the number to encode.
+    Underflow(T),
+}
+/// slightly faster fibonacci endocing (2x faster), taken from 
+/// https://github.com/antifuchs/fibonacci_codec
+#[inline]
+pub fn bits_from_table<T>(
+    n: T,
+    table: &'static [T],
+    result: &mut BitVec<u8, Msb0>,
+) -> Result<(), EncodeError<T>>
+where
+    T: CheckedSub + PartialOrd + Debug + Copy + Send + Sync + 'static,
+{
+    let mut current = n;
+    let split_pos = table
+        .iter()
+        .rposition(|elt| *elt <= n)
+        .ok_or(EncodeError::ValueTooSmall::<T>(n))?;
+
+    let mut i = result.len() + split_pos + 1;
+    // result.grow(split_pos + 2, false);
+
+    result.resize(result.len() + split_pos + 2, false);
+    result.set(i, true);
+    for elt in table.split_at(split_pos + 1).0.iter().rev() {
+        i -= 1;
+        if elt <= &current {
+            let next = match current.checked_sub(elt) {
+                Some(next) => next,
+                None => {
+                    // We encountered an underflow. This is a bug, and
+                    // I have no idea how it could even occur in real
+                    // life. However, let's clean up and return a
+                    // reasonable error:
+                    result.truncate(split_pos + 2);
+                    return Err(EncodeError::Underflow(n));
+                }
+            };
+            current = next;
+            result.set(i, true);
+        };
+    }
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod test {
-    use crate::fibonacci::{bitslice_to_fibonacci, FibonacciDecoder, MyBitVector};
+    use crate::fibonacci::{bitslice_to_fibonacci, FibonacciDecoder, MyBitVector, fib_enc_multiple};
     use bitvec::prelude::*;
 
     use super::fib_enc;
+    mod test_table {
+        use bitvec::{vec::BitVec, prelude::Msb0};
 
+        use crate::fibonacci::{FIB64, bits_from_table};
+
+        #[test]
+        fn test_1() {
+            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            bits_from_table(1, FIB64, &mut bv).unwrap();
+            assert_eq!(
+                bv.iter().collect::<Vec<_>>(), 
+                vec![true, true] 
+            );
+        }
+
+        #[test]
+        fn test_2() {
+            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            bits_from_table(2, FIB64, &mut bv).unwrap();
+            assert_eq!(
+                bv.iter().collect::<Vec<_>>(), 
+                vec![false, true, true] 
+            );
+        }
+        #[test]
+        fn test_14() {
+            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            bits_from_table(14, FIB64, &mut bv).unwrap();
+            assert_eq!(
+                bv.iter().collect::<Vec<_>>(), 
+                vec![true, false, false, false, false, true, true] 
+            );
+        }
+        #[test]
+        fn test_consecutive() {
+            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            bits_from_table(1, FIB64, &mut bv).unwrap();
+            bits_from_table(2, FIB64, &mut bv).unwrap();
+            bits_from_table(1, FIB64, &mut bv).unwrap();
+            assert_eq!(
+                bv.iter().collect::<Vec<_>>(), 
+                vec![true, true, false,true,true, true, true] 
+            );
+        }
+        
+    }
     #[test]
     fn test_fib_encode_5() {
         assert_eq!(
@@ -219,6 +348,16 @@ mod test {
             vec![true, false, false, false, false, true, true] 
         );
     }
+
+    #[test]
+    fn test_fib_encode_mutiple() {
+        let enc = fib_enc_multiple( &vec![1,14]);
+        assert_eq!(
+            enc.iter().collect::<Vec<_>>(), 
+            vec![true, true, true, false, false, false, false, true, true] 
+        );
+    }
+
     #[test]
     #[should_panic(expected = "n must be positive")]
     fn test_fib_encode_0() {
