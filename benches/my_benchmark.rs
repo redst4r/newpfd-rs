@@ -1,8 +1,9 @@
 use bitvec::{vec::BitVec, prelude::Msb0};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use fibonacci_codec::Encode;
-use newpfd::fibonacci::{bits_from_table, FibonacciDecoder, fib_enc_multiple};
-use newpfd::{newpfd_bitvec::{encode, decode}, fibonacci::{fib_enc, FIB64}};
+use newpfd::fibonacci::{bits_from_table, FibonacciDecoder};
+use newpfd::fibonacci_old::fib_enc_multiple;
+use newpfd::{newpfd_bitvec::{encode, decode}, fibonacci::FIB64};
 use rand::distributions::{Distribution, Uniform};
 
 
@@ -117,7 +118,7 @@ fn fibonacci_decode(c: &mut Criterion){
     
     let mut overall: BitVec<u8, Msb0> = BitVec::new();
     for &x in data.iter() {
-        let mut enc =newpfd::fibonacci::fib_enc(x);
+        let mut enc =newpfd::fibonacci_old::fib_enc(x);
         overall.append(&mut enc);
     }
     c.bench_function(
@@ -135,6 +136,5 @@ fn fibonacci_decode(c: &mut Criterion){
 }
 
 // criterion_group!(benches, newpfd_encode_decode);
-// criterion_group!(benches, fibonacci_encode);
-criterion_group!(benches, fibonacci_decode);
+criterion_group!(benches, fibonacci_encode, fibonacci_decode);
 criterion_main!(benches);

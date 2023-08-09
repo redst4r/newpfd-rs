@@ -4,6 +4,12 @@ Rust library implementing the [NewPFD](https://dl.acm.org/doi/10.1145/1526709.15
 - Encoding: 220ms/ 1M integers
 - Decoding: 20ms/ 1M integers
 
+See benchmarks for details.
+
+Fibonacci encoding/decoding is up to speed with other rust implementations, e.g. fibonnaci_codec crate (which I took some code from):
+- Fibonacci encoding: 182ms/ 1M integers  (fibonnaci_codec: 170ms)
+- Fibonacci encoding: 160ms/ 1M integers  (fibonnaci_codec: 140ms)
+
 ## Examples
 For more examples, see the rust-docs.
 ```rust
@@ -21,6 +27,3 @@ let (decompressed_data, bits_processed) = decode(&compressed_data, data.len(), b
 assert_eq!(data, decompressed_data);
 assert_eq!(compressed_data.len(), bits_processed); // the entire bitstream was consumed
 ```
-
-## TODO
-- [ ] makeFibonacci encoding faster.

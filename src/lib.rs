@@ -46,17 +46,17 @@
 //! 
 //! # Performance
 //! The library is currently *NOT* optimized for performance! 
-//! In particular, the Fibbonaci encoding/decoding could probably be made faster.
+//! I'm using some code from the fibonacci_codec crate to have efficient encoding/decoding of int-streams.
 //! 
 //! However, here's what we get in terms of encoding and decoding 1Mio 1byte integers (0..255):
 //! ```bash,no_run     
 //! mean +/- std
-//! Encoding: [554.66 ms 227.34 ms 578.47 ms]
-//! Decoding: [18.931 ms 19.214 ms 19.523 ms]
+//! Encoding: [229.65 ms 232.11 ms 234.77 ms]
+//! Decoding: [17.499 ms 17.724 ms 17.958 ms]
 //! ```
 //! Decoding seems to be vastly faster!
 //! 
 #![deny(missing_docs)]
 pub mod newpfd_bitvec;
 pub mod fibonacci;
-// pub mod newpfd;
+pub mod fibonacci_old;
