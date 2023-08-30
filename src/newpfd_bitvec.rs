@@ -147,6 +147,7 @@ struct PrimaryBuffer {
     
     // = 
 }
+
 impl PrimaryBuffer {
     /// create an empty primary buffer, storing `blocksize` elements, using `b_bits` Bits per element
     pub fn new(b_bits: usize, blocksize: usize) -> Self {
@@ -154,22 +155,47 @@ impl PrimaryBuffer {
         PrimaryBuffer {
             buffer,
             b_bits,
-            blocksize,
-            n_elements: 0,
-            position: 0
+            blocksize,  // max elements to store here
+            position: 0  // todo: redudant with n_elements
         }
+    }
+
+    fn get_n_elements(&self) -> usize{
+        self.position / self.b_bits
     }
 
     /// adds a single element to the primary buffer, storing its lowest `b_b its`
     pub fn add_element(&mut self, el: u64) {
         // doesnt check if b_bits are enough, just stores the lowest b_bits
-
-        if self.n_elements >= self.blocksize {
+        if self.get_n_elements() >= self.blocksize {
             panic!("storing too many elements")
         }
         self.buffer[self.position..self.position+self.b_bits].store_be::<u64>(el); //store_be chops of higher bits
         self.position+=self.b_bits;
-        self.n_elements+=1;
+    }
+
+    /// decodes the ENTIRE buffer, even if not fully filled
+    /// trailing elements will be zero 
+    pub fn decode(&self) -> Vec<u64> {
+
+        let mut decoded_primary: Vec<u64> = Vec::with_capacity(self.blocksize);
+        let mut pos = 0;
+        for _ in 0..self.blocksize {
+            // split off an element into x
+            let bits = &self.buffer[pos..pos+self.b_bits];
+            pos+=self.b_bits;
+            decoded_primary.push(decode_primary_buf_element(bits));
+        }
+        decoded_primary
+    }
+
+    // problem: ned to move buffer, but usually its only a view
+    pub fn from_bitvec(b: bv::BitVec<u8, bv::Msb0>, b_bits:usize) -> Self {
+
+        assert_eq!(b.len() % b_bits, 0, "buffer length is not a multiple of bitsize");
+        let blocksize = b.len() / b_bits;
+        let nbits = b.len();
+        PrimaryBuffer { buffer: b, b_bits, blocksize, position: nbits }
     }
 }
 
@@ -474,6 +500,45 @@ mod test {
         assert_eq!(decoded, input);
     }
 
+    mod primarybuffer{
+        use crate::newpfd_bitvec::PrimaryBuffer;
+
+        #[test]
+        fn test_n_elements() {
+            let mut b = PrimaryBuffer::new(3, 512);
+            b.add_element(10);
+            assert_eq!(b.get_n_elements(), 1);
+            b.add_element(0);
+            assert_eq!(b.get_n_elements(), 2);
+        }
+
+        #[test]
+        fn test_encode_decode_no_overflow() {
+            // in 3 bits we can encode anything [0,7]
+            let v = vec![0, 1,2,3,4,5,6,7];
+            let mut b = PrimaryBuffer::new(3, 32);
+            for el in v.iter() {
+                b.add_element(*el);
+            }
+            let dec = b.decode();
+            assert_eq!(dec.len(), 32);
+            assert_eq!(dec[..v.len()], v);
+        }
+        #[test]
+        fn test_encode_decode_with_overflow() {
+            // in 2 bits we can encode anything [0,4]
+            let v = vec![0,1,2,3,4,5,6,7];
+            let mut b = PrimaryBuffer::new(2, 32);
+            for el in v.iter() {
+                b.add_element(*el);
+            }
+            let dec = b.decode();
+            assert_eq!(dec.len(), 32);
+            assert_eq!(dec[..v.len()], vec![0,1,2,3,0,1,2,3]);
+        }
+
+
+    }
     #[test]
     fn test_encode_padding() {
         // each block (header+body)must be a mutiple of u32
