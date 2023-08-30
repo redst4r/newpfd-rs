@@ -63,15 +63,11 @@ pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocks
     let mut pos = 0;
     let mut elements: Vec<u64> = Vec::with_capacity(n_elements);
     while elements.len() < n_elements {
-        // println!("Decoding newPFD Block {}: {:?}, len={}", i, encoded, encoded.len());
-        // each call shortens wth encoded BitVec
-
+        // each call shortens the encoded BitVec
         let current_block = &newpfd_buf[pos..];
         let (els, bits_consumed) = decode_newpfdblock(current_block, blocksize);
 
         pos+= bits_consumed;
-        // println!("----remaining size {}, {:?}", encoded.len(), encoded);
-        // println!("Decoded {} elements", els.len());
 
         for el in els {
             elements.push(el);
@@ -111,7 +107,6 @@ pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (bv::B
         n_elements +=  block_elements.len();
 
         let params = NewPFDBlock::get_encoding_params(&block_elements, 0.9);
-        // println!("newpfd params: {params:?}");
         let mut enc = NewPFDBlock::new(params.b_bits, blocksize);
         let enc_block = enc.encode(&block_elements, params.min_element);
         encoded_blocks.push(enc_block);
@@ -142,10 +137,8 @@ struct PrimaryBuffer {
     buffer: bv::BitVec<u8, bv::Msb0>,
     b_bits: usize,
     blocksize: usize,
-    n_elements: usize,  // how many eleements stored currently (could be read off from the position, but easier this way)
+    // n_elements: usize,  // how many eleements stored currently (could be read off from the position, but easier this way)
     position: usize,
-    
-    // = 
 }
 
 impl PrimaryBuffer {
@@ -215,23 +208,22 @@ impl PrimaryBuffer {
 /// * the `b_bits` lower bits of an exception go into the primary buffer.
 /// * the higher bits are stored after the primary buffer
 struct NewPFDBlock {
-    // blocksize: usize,
     b_bits: usize,  // The number of bits each num in `pfd_block` is represented with.
-    blocksize: usize, //usually 512, needs to be a multiple of 32
+    blocksize: usize, // the max number of elements to be stored; usually 512, needs to be a multiple of 32
     // primary_buffer: Vec<bv::BitVec<u8, bv::Msb0>>,
     exceptions: Vec<u64>,
     index_gaps : Vec<u64>
 }
 
 impl NewPFDBlock {
-    pub fn new(b_bits: usize, blocksize: usize) -> Self {
+    /// create NewPDFBlock, with bbits per interger, and a total number of elements == blocksize
+    fn new(b_bits: usize, blocksize: usize) -> Self {
 
         assert_eq!(blocksize % 32, 0, "Blocksize must be mutiple of 32");
         // let pb = Vec::with_capacity(blocksize);
         let exceptions: Vec<u64> = Vec::new();
         let index_gaps : Vec<u64> = Vec::new();
         NewPFDBlock { 
-            // blocksize: blocksize, 
             b_bits, 
             blocksize,
             // primary_buffer: pb, 
@@ -241,7 +233,9 @@ impl NewPFDBlock {
     }
 
     /// determine the bitwidth used to store the elements of the block
-    /// and the minimum element of the block 
+    /// and the minimum element of the block
+    /// Bitwidth is chosen such that `percent_threshold * input.len()` elements
+    /// can be encoded by `b_bits`, typically 0.9 (90%)
     pub fn get_encoding_params(input: &[u64], percent_threshold: f64) -> NewPFDParams {
 
         // get the `percent_threshold` quantile of the input stream
@@ -253,6 +247,7 @@ impl NewPFDBlock {
             let the_element = input[0];
             (the_element, u64::BITS - the_element.leading_zeros())
         } else {
+            // TODO: no need to fully sort! partial sort would be ok too
             // let (_, the_element, _) = input.select_nth_unstable(ix);
 
             let mut sorted = input.iter().sorted();
@@ -293,9 +288,8 @@ impl NewPFDBlock {
             // if its an exception, ie to big to be stored in b-bits
             // we store the overflowing bits seperately
             // and remember where this exception is
-            // todo: convert diff to BitSlice, subset the bits into head|tail
+            // TODO: nicer synthax: convert diff to BitSlice, subset the bits into head|tail
             if diff > max_elem_bit_mask {
-                // println!("Exception {}", diff);
                 self.exceptions.push(diff >> self.b_bits);
                 self.index_gaps.push((i as u64)- last_ex_idx);
                 last_ex_idx = i as u64;
@@ -308,23 +302,17 @@ impl NewPFDBlock {
             // excess bits are removed automatically!
             prim_buf.add_element(diff);
         }
-        // println!("encode: Primary {:?}", self.primary_buffer);
-        // println!("encode: b_bits {}, min: {}, #exc {} ", self.b_bits, min_element, self.exceptions.len());
-        // println!("encode: min_el {}", min_element);
-        // println!("encode: n_ex {}", self.exceptions.len());
-        // println!("encode: Exceptions {:?}", self.exceptions);
-        // println!("encode: Gaps: {:?}", self.index_gaps);
 
         let body = prim_buf.buffer;
 
         // the primary buffer must fit into a multiple of u32! the format demands it
-        //TODO this is already true for the prim_buf implementation
+        // TODO this is already true for the prim_buf implementation
         assert_eq!(body.len() % 32, 0); 
 
         // now, put the "BlockHeader"  in front of the merged_primary buffer we store via fibonacci encoding:
         // 1. b_bits
         // 2. min_element
-        // 3.n_exceptions
+        // 3. n_exceptions
         // 4. index_gaps
         // 5. exceptions
         let mut to_encode: Vec<u64> = vec![
@@ -343,7 +331,6 @@ impl NewPFDBlock {
         for _ in 0..to_pad {
             header.push(false);
         }
-        // println!("padded Header by {} bits to {}", to_pad, header.len());
 
         // merge header + body
         header.extend(body);
@@ -369,39 +356,35 @@ impl NewPFDBlock {
 /// Hence we return the remainder explicitly
 fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Vec<u64>, usize) {
 
-    // println!("********Start of NewPFD Block************");
-    // println!("decode_newpfdblock \n{}", bitstream_to_string(buf));
-    // The header, piece by piece
-
     let mut buf_position = 0;
-
     let mut fibdec = fibonacci::FibonacciDecoder::new(buf);
+    // pulling the elements out of the header (b_bits, min_el, n_exceptions)
     let _b_bits = fibdec.next().unwrap();
     let mut b_bits = _b_bits as usize;
-
     let mut min_el = fibdec.next().unwrap();
     let mut n_exceptions = fibdec.next().unwrap();
 
+    // as fibonaccis encoding doesnt allow 0 everything is shifted by +1
+    // undo that here
     b_bits -= 1;
     min_el -= 1;
     n_exceptions -= 1;
-    
-    // println!("Decoded Header b_bits: {b_bits} min_el: {min_el} n_exceptions: {n_exceptions}");
 
-    // println!("Decoding gaps");
+    // decoding the Gaps
     let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
     for _ in 0..n_exceptions { 
         let ix =  fibdec.next().unwrap() - 1; // shift in encode
         index_gaps.push(ix);
     }
 
-    // println!("Decoding exceptions");
+    // Decoding expections
     let mut exceptions = Vec::with_capacity(n_exceptions as usize);
     for _ in 0..n_exceptions { 
         let ex = fibdec.next().unwrap();
         exceptions.push(ex);
     }
 
+    // turn index gaps into the actual index (of expections)
     let index: Vec<u64> = index_gaps
         .into_iter()
         .scan(0, |acc, i| {
@@ -410,62 +393,39 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
         })
         .collect();
 
-    // println!("remain {:?}, len {}", x, x.len(), );
     // need to remove trailing 0s which where used to pad to a muitple of 32
-    // let bits_after = x.len();
-    // let delta_bits  = bits_before-bits_after;
     let delta_bits = fibdec.get_bits_processed();
     let padded_bits =  round_to_multiple(delta_bits, 32) - delta_bits;
-    // println!("#exceptions {}, delta_bits {delta_bits}", exceptions.len());
-    // println!("BS after ec len {}", &buf[buf_position + delta_bits + padded_bits..].len());
-    // println!("padded BS after ec{:?}", bitstream_to_string(&buf[buf_position+delta_bits..buf_position + delta_bits + padded_bits]));
     assert!(!buf[buf_position+delta_bits..buf_position + delta_bits + padded_bits].any());
+    
+    // move the new buffer position at the end
     buf_position = buf_position + delta_bits + padded_bits;
 
-
-    // the body of the block
+    // the body of the block, i.e. bitpacked integers
     let buf_body = &buf[buf_position..];
+
+    // let buf_body_full = &buf[buf_position..buf_position+(blocksize*b_bits)];
+
     let mut body_pos = 0;
-    // println!("buf_body \n{}", bitstream_to_string(buf_body));
     
     // note that a block can be shorter than sepcifiec if we ran out of elements
     // however, as currently implements (by bustools)
     // the primary block always has blocksize*b_bits bitsize!
     // i.e. for a partial block, we cant really know how many elements are in there
     // (they might all be 0)
-    /*
-    let n_elements = if (x.len() /b_bits) < blocksize {
-        assert_eq!(x.len() % b_bits, 0); 
-        let n_elem_truncate = x.len() / b_bits;
-        n_elem_truncate
-    } else {
-        blocksize
-    };
-    */
+
     let n_elements = blocksize;
     let mut decoded_primary: Vec<u64> = Vec::with_capacity(n_elements);
 
     // TODO: move this code into PrimaryBuffer
     for _ in 0..n_elements {
-        // println!("++++++++++++++Element {}/{}++++++++++++*", i+1, n_elements);
-        // println!("{:?}", x);
         // split off an element into x
         let bits = &buf_body[body_pos..body_pos+b_bits];
         body_pos+=b_bits;
-        // println!("buf_pos {}",         body_pos);
-        // println!("n_El {}",         i);
-        // println!("prim bits {}", bitstream_to_string(bits));
-
         decoded_primary.push(decode_primary_buf_element(bits));
-        // println!("remaining size {}", x.len())
     }
-    // println!("********End of NEWPFD  Block************\n");
-    // println!("decode Index: {:?}", index);
-    // println!("decode Excp: {:?}", exceptions);
-    // println!("decode prim: {:?}", decoded_primary);
-    // println!("decode min: {}", min_el);
 
-    // puzzle it together
+    // puzzle it together: at the locations of exceptions, increment the decoded values
     for (i, highest_bits) in izip!(index, exceptions) {
         let lowest_bits = decoded_primary[i as usize];
         let el = (highest_bits << b_bits) | lowest_bits;
@@ -475,9 +435,6 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
 
     //shift up againsty min_element
     let decoded_final: Vec<u64> = decoded_primary.iter().map(|x|x+min_el).collect();
-
-    // println!("!!!remaining size {}, {:?}", x.len(), x);
-    // println!("Final decode {:?}", decoded_final);
     (decoded_final, buf_position+body_pos)
 }
 
@@ -493,10 +450,7 @@ mod test {
         let (encoded, n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
         assert_eq!(n_el, input.len());
         let encoded_bv: bv::BitVec<u8, bv::Msb0> = bv::BitVec::from_iter(encoded.iter());
-        // println!("Encoded bv:\n{}", bitstream_to_string(&encoded_bv));
-
         let (decoded, _) = decode(&encoded_bv.as_bitslice(), 5, 32);
-        
         assert_eq!(decoded, input);
     }
 
@@ -536,9 +490,8 @@ mod test {
             assert_eq!(dec.len(), 32);
             assert_eq!(dec[..v.len()], vec![0,1,2,3,0,1,2,3]);
         }
-
-
     }
+
     #[test]
     fn test_encode_padding() {
         // each block (header+body)must be a mutiple of u32
