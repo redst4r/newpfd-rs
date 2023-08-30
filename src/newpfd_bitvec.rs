@@ -135,21 +135,26 @@ pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (bv::B
 #[derive(Debug)]
 struct PrimaryBuffer {
     buffer: bv::BitVec<u8, bv::Msb0>,
-    b_bits: usize,
-    blocksize: usize,
-    // n_elements: usize,  // how many eleements stored currently (could be read off from the position, but easier this way)
-    position: usize,
+    b_bits: usize,     // bits per int
+    blocksize: usize,  // max number of elements that can be stored
+    position: usize,   // current bitposition in the buffer
+    max_elem_bit_mask : u64  // max element encodable by b_bits
 }
 
 impl PrimaryBuffer {
     /// create an empty primary buffer, storing `blocksize` elements, using `b_bits` Bits per element
     pub fn new(b_bits: usize, blocksize: usize) -> Self {
         let buffer = bv::BitVec::repeat(false, b_bits*blocksize);
+
+        // this is the maximum element we can store using b_bits
+        let max_elem_bit_mask = (1_u64 << b_bits) - 1;
+
         PrimaryBuffer {
             buffer,
             b_bits,
-            blocksize,  // max elements to store here
-            position: 0  // todo: redudant with n_elements
+            blocksize,
+            position: 0,
+            max_elem_bit_mask
         }
     }
 
@@ -158,13 +163,25 @@ impl PrimaryBuffer {
     }
 
     /// adds a single element to the primary buffer, storing its lowest `b_b its`
-    pub fn add_element(&mut self, el: u64) {
-        // doesnt check if b_bits are enough, just stores the lowest b_bits
+    /// if there's excess bits, they are returned as Some(u64) otherwise none 
+    pub fn add_element(&mut self, el: u64) -> Option<u64>{
+
         if self.get_n_elements() >= self.blocksize {
             panic!("storing too many elements")
         }
+
         self.buffer[self.position..self.position+self.b_bits].store_be::<u64>(el); //store_be chops of higher bits
         self.position+=self.b_bits;
+
+        // any excess bits that didnt fit?
+        // TODO: nicer synthax: convert diff to BitSlice, subset the bits into head|tail
+        if el > self.max_elem_bit_mask {
+            let excess =el >> self.b_bits;
+            Some(excess)
+        }
+        else {
+            None
+        }
     }
 
     /// decodes the ENTIRE buffer, even if not fully filled
@@ -187,8 +204,10 @@ impl PrimaryBuffer {
 
         assert_eq!(b.len() % b_bits, 0, "buffer length is not a multiple of bitsize");
         let blocksize = b.len() / b_bits;
-        let nbits = b.len();
-        PrimaryBuffer { buffer: b, b_bits, blocksize, position: nbits }
+        let nbits: usize = b.len();
+        let max_elem_bit_mask = (1_u64 << b_bits) - 1;
+
+        PrimaryBuffer { buffer: b, b_bits, blocksize, position: nbits, max_elem_bit_mask }
     }
 }
 
@@ -273,9 +292,6 @@ impl NewPFDBlock {
 
         assert!(input.len() <= self.blocksize);
 
-        // this is the maximum element we can store using b_bits
-        let max_elem_bit_mask = (1_u64 << self.b_bits) - 1;
-
         // index of the last exception we came across
         let mut last_ex_idx = 0;
 
@@ -283,24 +299,19 @@ impl NewPFDBlock {
         // go over all elements, split each element into low bits (fitting into the primary)
         // and the high bits, which go into the exceptions
         for (i,x) in input.iter().enumerate() {
-            let mut diff = x- min_element; // all elements are stored relative to the min
+            let diff = x- min_element; // all elements are stored relative to the min
 
+            // add the element to primary buffer and see if theres any excess
+            let any_excess_bits = prim_buf.add_element(diff);
+            
             // if its an exception, ie to big to be stored in b-bits
             // we store the overflowing bits seperately
-            // and remember where this exception is
-            // TODO: nicer synthax: convert diff to BitSlice, subset the bits into head|tail
-            if diff > max_elem_bit_mask {
-                self.exceptions.push(diff >> self.b_bits);
+            // and remember where this exception is            
+            if let Some(ebits) = any_excess_bits {
+                self.exceptions.push(ebits);
                 self.index_gaps.push((i as u64)- last_ex_idx);
-                last_ex_idx = i as u64;
-
-                // write the stuff that fits into the field
-                diff &= max_elem_bit_mask;  // bitwise and with 111111...1111 to get the `b_bits` least significant bits
+                last_ex_idx = i as u64;                
             }
-
-            // put the rest into the primary buffer
-            // excess bits are removed automatically!
-            prim_buf.add_element(diff);
         }
 
         let body = prim_buf.buffer;
@@ -452,44 +463,6 @@ mod test {
         let encoded_bv: bv::BitVec<u8, bv::Msb0> = bv::BitVec::from_iter(encoded.iter());
         let (decoded, _) = decode(&encoded_bv.as_bitslice(), 5, 32);
         assert_eq!(decoded, input);
-    }
-
-    mod primarybuffer{
-        use crate::newpfd_bitvec::PrimaryBuffer;
-
-        #[test]
-        fn test_n_elements() {
-            let mut b = PrimaryBuffer::new(3, 512);
-            b.add_element(10);
-            assert_eq!(b.get_n_elements(), 1);
-            b.add_element(0);
-            assert_eq!(b.get_n_elements(), 2);
-        }
-
-        #[test]
-        fn test_encode_decode_no_overflow() {
-            // in 3 bits we can encode anything [0,7]
-            let v = vec![0, 1,2,3,4,5,6,7];
-            let mut b = PrimaryBuffer::new(3, 32);
-            for el in v.iter() {
-                b.add_element(*el);
-            }
-            let dec = b.decode();
-            assert_eq!(dec.len(), 32);
-            assert_eq!(dec[..v.len()], v);
-        }
-        #[test]
-        fn test_encode_decode_with_overflow() {
-            // in 2 bits we can encode anything [0,4]
-            let v = vec![0,1,2,3,4,5,6,7];
-            let mut b = PrimaryBuffer::new(2, 32);
-            for el in v.iter() {
-                b.add_element(*el);
-            }
-            let dec = b.decode();
-            assert_eq!(dec.len(), 32);
-            assert_eq!(dec[..v.len()], vec![0,1,2,3,0,1,2,3]);
-        }
     }
 
     #[test]
@@ -655,6 +628,40 @@ mod test {
             p.add_element(1); 
             p.add_element(1); 
             p.add_element(1); // excess element
+        }
+
+        #[test]
+        fn test_n_elements() {
+            let mut b = PrimaryBuffer::new(3, 512);
+            b.add_element(10);
+            assert_eq!(b.get_n_elements(), 1);
+            b.add_element(0);
+            assert_eq!(b.get_n_elements(), 2);
+        }
+
+        #[test]
+        fn test_encode_decode_no_overflow() {
+            // in 3 bits we can encode anything [0,7]
+            let v = vec![0, 1,2,3,4,5,6,7];
+            let mut b = PrimaryBuffer::new(3, 32);
+            for el in v.iter() {
+                b.add_element(*el);
+            }
+            let dec = b.decode();
+            assert_eq!(dec.len(), 32);
+            assert_eq!(dec[..v.len()], v);
+        }
+        #[test]
+        fn test_encode_decode_with_overflow() {
+            // in 2 bits we can encode anything [0,4]
+            let v = vec![0,1,2,3,4,5,6,7];
+            let mut b = PrimaryBuffer::new(2, 32);
+            for el in v.iter() {
+                b.add_element(*el);
+            }
+            let dec = b.decode();
+            assert_eq!(dec.len(), 32);
+            assert_eq!(dec[..v.len()], vec![0,1,2,3,0,1,2,3]);
         }
     }
 }
