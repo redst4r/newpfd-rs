@@ -266,13 +266,19 @@ impl NewPFDBlock {
             let the_element = input[0];
             (the_element, u64::BITS - the_element.leading_zeros())
         } else {
-            // TODO: no need to fully sort! partial sort would be ok too
-            // let (_, the_element, _) = input.select_nth_unstable(ix);
 
-            let mut sorted = input.iter().sorted();
-            let minimum = *sorted.next().unwrap();
-            let mut the_element = *sorted.nth(ix-1).unwrap();   //-1 since we took the first el out 
+            // instead of sorting the list (to find the 90% element)
+            // we can just paritally sort (determining the location of ix)
+            let (minimum, mut scratch) = min_and_clone(input);
+            let (_, &mut mut the_element, _) = scratch.select_nth_unstable(ix);
+
+            // the old way: fully sorting the list, around 30% slower
+            // let mut sorted = input.iter().sorted();
+            // let minimum = *sorted.next().unwrap();
+            // let mut the_element = *sorted.nth(ix-1).unwrap();   //-1 since we took the first el out 
+            
             the_element -= minimum; // since we're encoding relative to the minimum
+
             let n_bits = u64::BITS - the_element.leading_zeros(); 
             (minimum, n_bits)
         };
@@ -348,6 +354,20 @@ impl NewPFDBlock {
         header
     }
 
+}
+
+/// copying a vector AND finding its minimum in one go
+/// purely for preformace reasons
+fn min_and_clone(x: &[u64]) -> (u64, Vec<u64>) {
+    let mut theclone:Vec<u64> = Vec::with_capacity(x.len());
+    let mut the_min = x[0]; 
+    for el in x {
+        if *el < the_min {
+            the_min = *el;
+        }
+        theclone.push(*el)
+    }
+    (the_min, theclone)
 }
 
 /// Decoding a block of NewPFD from a BitVec containing a series of blocks

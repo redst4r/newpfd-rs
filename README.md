@@ -1,7 +1,7 @@
 # NewPFD-rs
 
 Rust library implementing the [NewPFD](https://dl.acm.org/doi/10.1145/1526709.1526764) integer compression/decompression algorithm. It's currently lacking optimization for speed, but it's decently fast: 
-- Encoding: 220ms/ 1M integers
+- Encoding: 150ms/ 1M integers
 - Decoding: 20ms/ 1M integers
 
 See benchmarks for details.
