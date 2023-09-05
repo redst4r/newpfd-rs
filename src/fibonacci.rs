@@ -43,7 +43,10 @@ fn iterative_fibonacci() -> Fibonacci {
 
 // not sure what the significance of those settings is
 // in busz, converting byte buffers to BitSlices seems to require u8;Msb01
+/// The type of bitvector used in the crate.
+/// Importantly, some code *relies* on `Msb0`
 pub (crate) type MyBitSlice = BitSlice<u8, Msb0>;
+/// reftype thqt goes with [MyBitSlice]
 pub (crate) type MyBitVector = BitVec<u8, Msb0>;
 
 // let v: Vec<_> = iterative_fibonacci().take(65 - 1).collect();
@@ -125,27 +128,29 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
     type Item=u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // let pos = self.current_pos;
-        let mut lastbit = false;
 
+        let mut lastbit = false;
+        let mut accumulator = 0;
         let current_slice = &self.buffer[self.current_pos..];
         // println!("currentslice {:?}", current_slice);
-        for (idx, b) in current_slice.iter().enumerate() {
-
+        for (idx, b) in current_slice.iter().by_vals().enumerate() {
             if idx > 64 {
                 panic!("fib-codes cant be longer than 64bit, something is wrong!");
             }
-            if *b & lastbit {
-                // found 11
-                // let the_hit = Some(&self.buffer[self.current_pos..self.current_pos+idx+1]);
-                let the_hit = &current_slice[..idx+1];
-                self.current_pos += idx; 
-                self.current_pos += 1;
-
-                let decoded = bitslice_to_fibonacci(the_hit);
-                return Some(decoded);
+            match (lastbit, b) {
+                // current bit set, but not 11
+                (false, true) => {
+                    accumulator += FIB64[idx];
+                }
+                (true, true) => {
+                    // found 11
+                    let hit_len = idx+1;
+                    self.current_pos += hit_len; 
+                    return Some(accumulator);
+                }
+                (false, false) | (true, false) => {}
             }
-            lastbit = *b
+            lastbit = b
         }
         None
     }
