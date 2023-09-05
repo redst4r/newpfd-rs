@@ -190,7 +190,7 @@ where
 pub fn bits_from_table<T>(
     n: T,
     table: &'static [T],
-    result: &mut BitVec<u8, Msb0>,
+    result: &mut MyBitVector,
 ) -> Result<(), EncodeError<T>>
 where
     T: CheckedSub + PartialOrd + Debug + Copy + Send + Sync + 'static,
@@ -234,13 +234,12 @@ mod test {
     use bitvec::prelude::*;
 
     mod test_table {
-        use bitvec::{vec::BitVec, prelude::Msb0};
-
-        use crate::fibonacci::{FIB64, bits_from_table, fib_enc_multiple_fast};
+        use bitvec::vec::BitVec;
+        use crate::fibonacci::{FIB64, bits_from_table, fib_enc_multiple_fast, MyBitVector};
 
         #[test]
         fn test_1() {
-            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            let mut bv: MyBitVector = BitVec::new();
             bits_from_table(1, FIB64, &mut bv).unwrap();
             assert_eq!(
                 bv.iter().collect::<Vec<_>>(), 
@@ -250,7 +249,7 @@ mod test {
 
         #[test]
         fn test_2() {
-            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            let mut bv: MyBitVector = BitVec::new();
             bits_from_table(2, FIB64, &mut bv).unwrap();
             assert_eq!(
                 bv.iter().collect::<Vec<_>>(), 
@@ -259,7 +258,7 @@ mod test {
         }
         #[test]
         fn test_14() {
-            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            let mut bv: MyBitVector = BitVec::new();
             bits_from_table(14, FIB64, &mut bv).unwrap();
             assert_eq!(
                 bv.iter().collect::<Vec<_>>(), 
@@ -268,7 +267,7 @@ mod test {
         }
         #[test]
         fn test_consecutive() {
-            let mut bv: BitVec<u8,Msb0> = BitVec::new();
+            let mut bv: MyBitVector = BitVec::new();
             bits_from_table(1, FIB64, &mut bv).unwrap();
             bits_from_table(2, FIB64, &mut bv).unwrap();
             bits_from_table(1, FIB64, &mut bv).unwrap();
@@ -323,7 +322,7 @@ mod test {
 
 
     #[test]
-    fn test_fib_(){
+    fn test_bitslice_to_fibonacci(){
         let v: Vec<bool> = vec![1,1].iter().map(|x|*x==1).collect();
         let b: MyBitVector  = BitVec::from_iter(v.into_iter());
         assert_eq!(

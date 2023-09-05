@@ -3,7 +3,7 @@
 
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
-use crate::fibonacci::{self, fib_enc_multiple_fast};
+use crate::fibonacci::{self, fib_enc_multiple_fast, MyBitVector, MyBitSlice};
 
 /// round an integer to the next bigger multiple
 /// ```rust
@@ -24,7 +24,7 @@ struct NewPFDParams {
 
 /// elements in the primary buffer are stored using b_bits
 /// decode these as u64s
-fn decode_primary_buf_element(x: &bv::BitSlice<u8, bv::Msb0>) -> u64 {
+fn decode_primary_buf_element(x: &MyBitSlice) -> u64 {
     let a:u64 = x.load_be();
     a
 }
@@ -58,7 +58,7 @@ fn decode_primary_buf_element(x: &bv::BitSlice<u8, bv::Msb0>) -> u64 {
 /// assert_eq!(encoded.len(), bits_processed);
 /// ``` 
 /// 
-pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
+pub fn decode(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
 
     let mut pos = 0;
     let mut elements: Vec<u64> = Vec::with_capacity(n_elements);
@@ -96,10 +96,10 @@ pub fn decode(newpfd_buf: &bv::BitSlice<u8, bv::Msb0>, n_elements: usize, blocks
 /// let data = vec![1,2,3,4,5];
 /// let (encoded, _) = encode(data.into_iter(), 32);
 /// ``` 
-pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (bv::BitVec<u8, bv::Msb0>, usize) {
+pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (MyBitVector, usize) {
 
     let mut n_elements = 0;
-    let mut encoded_blocks : Vec<bv::BitVec<u8, bv::Msb0>> = Vec::new();
+    let mut encoded_blocks : Vec<MyBitVector> = Vec::new();
     // chunk the input into blocks
     for b in &input_stream.chunks(blocksize) {
 
@@ -134,7 +134,7 @@ pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (bv::B
 /// but just takes each elements lowerest `b_bits`, truncating the higher bits
 #[derive(Debug)]
 struct PrimaryBuffer {
-    buffer: bv::BitVec<u8, bv::Msb0>,
+    buffer: MyBitVector,
     b_bits: usize,     // bits per int
     blocksize: usize,  // max number of elements that can be stored
     position: usize,   // current bitposition in the buffer
@@ -200,7 +200,7 @@ impl PrimaryBuffer {
     }
 
     // problem: ned to move buffer, but usually its only a view
-    pub fn from_bitvec(b: bv::BitVec<u8, bv::Msb0>, b_bits:usize) -> Self {
+    pub fn from_bitvec(b: MyBitVector, b_bits:usize) -> Self {
 
         assert_eq!(b.len() % b_bits, 0, "buffer length is not a multiple of bitsize");
         let blocksize = b.len() / b_bits;
@@ -294,7 +294,7 @@ impl NewPFDBlock {
 
     /// turns input data into the NewPFD storage format:
     /// represent items by b_bits, store any expections separately 
-    pub fn encode(&mut self, input: &[u64], min_element: u64) -> bv::BitVec<u8, bv::Msb0> {
+    pub fn encode(&mut self, input: &[u64], min_element: u64) -> MyBitVector {
 
         assert!(input.len() <= self.blocksize);
 
@@ -385,7 +385,7 @@ fn min_and_clone(x: &[u64]) -> (u64, Vec<u64>) {
 /// The bitvector x gets changed in this function. Oddly that has weird effects on this 
 /// variable outside the function (before return the x.len()=9, outside the function it is suddenly 3)
 /// Hence we return the remainder explicitly
-fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Vec<u64>, usize) {
+fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
 
     let mut buf_position = 0;
     let mut fibdec = fibonacci::FibonacciDecoder::new(buf);
@@ -474,13 +474,15 @@ fn decode_newpfdblock(buf: &bv::BitSlice<u8, bv::Msb0>, blocksize: usize) -> (Ve
 mod test {
     use bitvec::prelude as bv;
     use rand::{distributions::Uniform, prelude::Distribution};
+    use crate::fibonacci::MyBitVector;
+
     use super::{decode, encode};
     #[test]
     fn test_larger_ecs_22() {
         let input = vec![264597, 760881, 216982, 203942, 218976];
         let (encoded, n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
         assert_eq!(n_el, input.len());
-        let encoded_bv: bv::BitVec<u8, bv::Msb0> = bv::BitVec::from_iter(encoded.iter());
+        let encoded_bv: MyBitVector = bv::BitVec::from_iter(encoded.iter());
         let (decoded, _) = decode(&encoded_bv.as_bitslice(), 5, 32);
         assert_eq!(decoded, input);
     }
@@ -531,7 +533,7 @@ mod test {
         // println!("Enc length {}", encoded.len());
         // println!("Plain length {}", input.len()*64);
 
-        let encoded_bv: bv::BitVec<u8, bv::Msb0> = bv::BitVec::from_iter(encoded.iter());
+        let encoded_bv: MyBitVector = bv::BitVec::from_iter(encoded.iter());
 
         let (decoded,_) = crate::newpfd_bitvec::decode_newpfdblock(encoded_bv.as_bitslice(), blocksize);
 

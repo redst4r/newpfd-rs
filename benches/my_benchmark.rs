@@ -6,18 +6,19 @@ use newpfd::fibonacci_old::fib_enc_multiple;
 use newpfd::{newpfd_bitvec::{encode, decode}, fibonacci::FIB64};
 use rand::distributions::{Distribution, Uniform};
 
+// type MyBitSlice = BitSlice<u8, Msb0>;
+type MyBitVector = BitVec<u8, Msb0>;
 
+/// Encoding/Decoding 1M random [0,255] numbers
 fn newpfd_encode_decode(c: &mut Criterion){
     
-    fn _dummy_encode(data: Vec<u64>) -> bitvec::vec::BitVec<u8, bitvec::order::Msb0>{
-
+    fn _dummy_encode(data: Vec<u64>) -> MyBitVector{
         let blocksize = 512;
         let enc = encode(data.into_iter(), blocksize);
         enc.0
     }
 
-    fn _dummy_decode(data: BitVec<u8, Msb0>, n_elements: usize) -> Vec<u64>{
-
+    fn _dummy_decode(data: MyBitVector, n_elements: usize) -> Vec<u64>{
         let blocksize = 512;
         let enc = decode(&data, n_elements, blocksize);
         enc.0
@@ -36,7 +37,6 @@ fn newpfd_encode_decode(c: &mut Criterion){
         |b| b.iter(|| _dummy_encode(black_box(data.clone())))
     );
 
-
     // decoding
     let len = data.len();
     let (enc, _) = encode(data.into_iter(), 512);
@@ -50,13 +50,12 @@ fn newpfd_encode_decode(c: &mut Criterion){
 #[allow(dead_code)]
 fn fibonacci_encode(c: &mut Criterion){
 
-    fn _dummy_my_fib(data: Vec<u64>) -> bitvec::vec::BitVec<u8, bitvec::order::Msb0>{
-
+    fn _dummy_my_fib(data: Vec<u64>) -> MyBitVector{
         fib_enc_multiple(&data)
     }
 
-    fn _dummy_bit_table(data: Vec<u64>) -> bitvec::vec::BitVec<u8, bitvec::order::Msb0>{
-        let mut overall: BitVec<u8, Msb0> = BitVec::new();
+    fn _dummy_bit_table(data: Vec<u64>) -> MyBitVector{
+        let mut overall: MyBitVector = BitVec::new();
 
         for x in data {
             bits_from_table(x, FIB64, &mut overall).unwrap();
@@ -68,7 +67,6 @@ fn fibonacci_encode(c: &mut Criterion){
         data.fib_encode().unwrap()
     }   
 
-    
     let n = 100_000;
     let data_dist = Uniform::from(1..255);
     let mut rng = rand::thread_rng();
@@ -95,7 +93,7 @@ fn fibonacci_encode(c: &mut Criterion){
 #[allow(dead_code)]
 fn fibonacci_decode(c: &mut Criterion){
 
-    fn _dummy_my_decode(data: BitVec<u8, Msb0>) -> Vec<u64>{
+    fn _dummy_my_decode(data: MyBitVector) -> Vec<u64>{
         let d = FibonacciDecoder::new(data.as_bitslice());
         let dec: Vec<_> = d.collect();
         dec
@@ -114,7 +112,7 @@ fn fibonacci_decode(c: &mut Criterion){
         data.push(data_dist.sample(&mut rng));
     }
     
-    let mut overall: BitVec<u8, Msb0> = BitVec::new();
+    let mut overall: MyBitVector = BitVec::new();
     for &x in data.iter() {
         let mut enc =newpfd::fibonacci_old::fib_enc(x);
         overall.append(&mut enc);
@@ -133,6 +131,5 @@ fn fibonacci_decode(c: &mut Criterion){
 
 }
 
-criterion_group!(benches, newpfd_encode_decode);
-// criterion_group!(benches, fibonacci_encode, fibonacci_decode);
+criterion_group!(benches, newpfd_encode_decode, fibonacci_encode, fibonacci_decode);
 criterion_main!(benches);
