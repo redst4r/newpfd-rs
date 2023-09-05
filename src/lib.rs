@@ -13,7 +13,7 @@
 //! Rather it takes a refence to it, reads in the specific amount of elements and returns the number of bits processed.
 //! This allows for complex formats where NewPFD is only a small part,
 //! and after the NewPFD section, theres other data that has to be processed differently.
-//! In particular, cafter alling `let (decompressed_data, bits_processed) = decode(&compressed_data, data.len(), blocksize);`
+//! In particular, after calling `let (decompressed_data, bits_processed) = decode(&compressed_data, data.len(), blocksize);`
 //! you can get hold of the remaining bitstream via `compressed_data[bits_processed..]`
 //! 
 //! * This compression **does not** use delta compression internally. If you need that, apply it before feeding the data into `encode()`.
@@ -51,8 +51,8 @@
 //! However, here's what we get in terms of encoding and decoding 1Mio 1byte integers (0..255):
 //! ```bash,no_run     
 //! mean +/- std
-//! Encoding: [229.65 ms 232.11 ms 234.77 ms]
-//! Decoding: [17.499 ms 17.724 ms 17.958 ms]
+//! Encoding: [139.52 ms 139.99 ms 140.62 ms]
+//! Decoding: [15.956 ms 16.057 ms 16.199 ms]
 //! ```
 //! Decoding seems to be vastly faster!
 //! 

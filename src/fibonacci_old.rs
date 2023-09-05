@@ -6,7 +6,7 @@ use crate::fibonacci::{FIB64, MyBitVector};
 /// 
 /// # Example:
 /// ```rust
-/// # use newpfd::fibonacci::fib_enc;
+/// # use newpfd::fibonacci_old::fib_enc;
 /// let enc = fib_enc(1);  // a BitVec
 /// assert_eq!(enc.iter().collect::<Vec<_>>(), vec![true, true]);
 /// ```
@@ -55,9 +55,7 @@ pub fn fib_enc_multiple(data: &[u64]) -> MyBitVector {
 
 #[cfg(test)]
 mod test {
-    use crate::{fibonacci::{MyBitVector}, fibonacci_old::fib_enc_multiple};
-    use bitvec::prelude::*;
-
+    use crate::fibonacci_old::fib_enc_multiple;
     use super::fib_enc;
    
     #[test]

@@ -4,12 +4,10 @@
 //! 
 //! # Usage
 //! ```rust
-//! use newpfd::fibonacci::{fib_enc,FibonacciDecoder, bitslice_to_fibonacci};
-//! let mut encode1 = fib_enc(34) ;
-//! let mut encode2 = fib_enc(12);
-//! encode1.extend(encode2);
+//! use newpfd::fibonacci::{fib_enc_multiple_fast,FibonacciDecoder, bitslice_to_fibonacci};
+//! let encode = fib_enc_multiple_fast(&vec![34, 12]) ;
 //! 
-//! let f = FibonacciDecoder::new(&encode1);
+//! let f = FibonacciDecoder::new(&encode);
 //! assert_eq!(f.collect::<Vec<_>>(), vec![34,12])
 //! ```
 
