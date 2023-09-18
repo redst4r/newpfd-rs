@@ -59,4 +59,5 @@
 #![deny(missing_docs)]
 pub mod newpfd_bitvec;
 pub mod fibonacci;
+pub mod fibonacci_fast;
 pub mod fibonacci_old;
