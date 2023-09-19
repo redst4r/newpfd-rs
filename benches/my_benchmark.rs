@@ -1,4 +1,4 @@
-use bitvec::{vec::BitVec, prelude::Msb0};
+use bitvec::{vec::BitVec, prelude::Msb0, prelude::Lsb0};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use fibonacci_codec::Encode;
 use newpfd::fib_utils::random_fibonacci_stream;
@@ -162,9 +162,9 @@ fn fibonacci_bitslice(c: &mut Criterion){
 fn fast_decode_vs_regular(c: &mut Criterion){
 
     // create a long fib string
-    let data = random_fibonacci_stream(1_00_000, 100, 10000);
+    let data = random_fibonacci_stream(1_000_000, 1, 255);
     // make a copy for fast decoder
-    let mut data_fast: BitVec<usize, Msb0> = BitVec::new();
+    let mut data_fast: BitVec<usize, Lsb0> = BitVec::new();
     for bit in data.iter().by_vals() {
         data_fast.push(bit);
     }
@@ -204,4 +204,5 @@ fn fast_decode_vs_regular(c: &mut Criterion){
 
 criterion_group!(benches, fast_decode_vs_regular);
 // criterion_group!(benches, newpfd_encode_decode, fibonacci_encode, fibonacci_decode);
+// criterion_group!(benches, fibonacci_decode);
 criterion_main!(benches);
