@@ -17,10 +17,11 @@ fn get_bits_for_state(State(s): State) -> (usize, usize) {
  */
 /// used to remember the position in the bitvector and the partically decoded number
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Copy)]
-struct State(usize);
+pub struct State(pub usize);
 
-#[derive(Debug, Clone)]
-struct FsmResult {
+///
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FsmResult {
     numbers: Vec<u64>, // fully decoded numbers from the segment
     /// Stores the partially decoded number left in hte segment
     /// 
@@ -35,7 +36,7 @@ fn create_lookup(segment_size: usize) -> HashMap<(State, BitVec<usize, Lsb0>), (
     
     let mut table: HashMap<(State, BitVec<usize, Lsb0>), (State, FsmResult)> = HashMap::new();
 
-    for lastbit in vec![true, false]{
+    for lastbit in [true, false]{
         for s in 0..2.pow(segment_size) {
             let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
             
@@ -63,91 +64,6 @@ fn create_lookup(segment_size: usize) -> HashMap<(State, BitVec<usize, Lsb0>), (
     }
     table
 }
-/*
-// lookup using a u8 represnetation of the bitvec as action
-fn create_lookup_u8() -> (Vec<(State, FsmResult)>, Vec<(State, FsmResult)>,) {
-    
-    let segment_size = 8;
-
-    let mut table_state0 = Vec::new();
-    let mut table_state1 = Vec::new();
-
-    for lastbit in vec![true, false]{
-        for s in 0..2.pow(segment_size) {
-            let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
-            
-            let mut newstate = if *(bitstream.last().unwrap()) {State(1)} else {State(0)};
-            // newstate is pretty easy (just the last bit)
-            // EXCEPT this weird scenario:
-            // SEGMENT1|SEGMENT2|
-            // 00000011|10000000
-            // i.e. a terminator flush with the sement border AND a following 1bit
-            // in segment 2, if we set lastbit=True
-            // we'd immediately emit a new number
-            // however that lastbit has been "used up" in the delimiator already   
-            // Hence: whenever we end with a terminator, set State=0
-            let x1 = bitstream[bitstream.len()-2];
-            let x2 = bitstream[bitstream.len()-1];
-            if x1 && x2 {
-                newstate = State(0);
-            }
-            
-            // println!("{:?}", bitstream);
-            let r = decode_with_remainder(&bitstream, lastbit);
-
-            if lastbit {
-                table_state1.push((newstate, r))
-            }
-            else{
-                table_state0.push((newstate, r))
-            }
-        }
-    }
-    (table_state0, table_state1)
-}
-
-// lookup using a u8 represnetation of the bitvec as action
-fn create_lookup_u16() -> (Vec<(State, FsmResult)>, Vec<(State, FsmResult)>,) {
-    
-    let segment_size = 16;
-
-    let mut table_state0 = Vec::new();
-    let mut table_state1 = Vec::new();
-
-    for lastbit in vec![true, false]{
-        for s in 0..2.pow(segment_size) {
-            let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
-            
-            let mut newstate = if *(bitstream.last().unwrap()) {State(1)} else {State(0)};
-            // newstate is pretty easy (just the last bit)
-            // EXCEPT this weird scenario:
-            // SEGMENT1|SEGMENT2|
-            // 00000011|10000000
-            // i.e. a terminator flush with the sement border AND a following 1bit
-            // in segment 2, if we set lastbit=True
-            // we'd immediately emit a new number
-            // however that lastbit has been "used up" in the delimiator already   
-            // Hence: whenever we end with a terminator, set State=0
-            let x1 = bitstream[bitstream.len()-2];
-            let x2 = bitstream[bitstream.len()-1];
-            if x1 && x2 {
-                newstate = State(0);
-            }
-            
-            // println!("{:?}", bitstream);
-            let r = decode_with_remainder(&bitstream, lastbit);
-
-            if lastbit {
-                table_state1.push((newstate, r))
-            }
-            else{
-                table_state0.push((newstate, r))
-            }
-        }
-    }
-    (table_state0, table_state1)
-}
- */
 
 /// decodes a fibonacci stream until the very end of the stream
 /// there might be a remainder (behind the last 11 delimiter)
@@ -184,7 +100,7 @@ fn decode_with_remainder(bitstream: &BitSlice<usize, Lsb0>, lastbit_external: bo
             }
         }
     }
-    return FsmResult {numbers: decoded_ints, u: accum, lu: offset}
+    FsmResult {numbers: decoded_ints, u: accum, lu: offset}
 }
 
 #[test]
@@ -376,8 +292,7 @@ pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
             if len > 0 {  // some leftover from the previous segment
                 // println!("{}", n);
                 n += fibonacci_left_shift(num, len);
-            }
-            else {
+            } else {
                 n = num;
             }
 
@@ -402,9 +317,8 @@ pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
 
     // println!("Total stream {}", bitstream_to_string(&stream));
     let segment_size = 16;
-    // let (t0, t1) = create_lookup_u16();
-    // let table = LookupU16Vec::new();
-    let table = LookupU16Hash::new();
+    let table = LookupU16Vec::new();
+    // let table = LookupU16Hash::new();
 
     let mut decoded_numbers = Vec::new();
     let mut n_chunks = stream.len() / segment_size;
@@ -516,6 +430,7 @@ fn test_fast_decode_111_at_segment_border() {
 fn test_correctness() {
     use crate::fibonacci::FibonacciDecoder;
     use crate::fib_utils::random_fibonacci_stream;
+    // use crate::newpfd_bitvec::bitstream_to_string;
     let b = random_fibonacci_stream(200, 1, 100);
     // let b = dummy_encode(vec![64, 11, 88]);
     // make a copy for fast decoder
@@ -575,7 +490,7 @@ impl LookupU8Vec {
         let mut table_state0 = Vec::new();
         let mut table_state1 = Vec::new();
     
-        for lastbit in vec![true, false]{
+        for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
                 let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
                 
@@ -615,7 +530,7 @@ impl LookupU8Vec {
             State(1) => self.table_state1.get(segment as usize).unwrap(),
             State(_) => panic!("yyy")
         };
-        (newstate.clone(), result.clone())
+        (*newstate, result.clone())
     }
 }
 
@@ -630,7 +545,7 @@ impl LookupU8Hash {
         let mut table_state0 = HashMap::new();
         let mut table_state1 = HashMap::new();
     
-        for lastbit in vec![true, false]{
+        for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
                 let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
                 
@@ -666,11 +581,11 @@ impl LookupU8Hash {
 
     pub fn lookup(&self, s: State, segment: u8) -> (State, FsmResult) {
         let (newstate, result) = match s {
-            State(0) => self.table_state0.get(&(segment as u8)).unwrap(),
-            State(1) => self.table_state1.get(&(segment as u8)).unwrap(),
+            State(0) => self.table_state0.get(&(segment)).unwrap(),
+            State(1) => self.table_state1.get(&(segment)).unwrap(),
             State(_) => panic!("yyy")
         };
-        (newstate.clone(), result.clone())
+        (*newstate, result.clone())
     }
 }
 
@@ -687,7 +602,7 @@ impl LookupU16Vec {
         let mut table_state0 = Vec::new();
         let mut table_state1 = Vec::new();
     
-        for lastbit in vec![true, false]{
+        for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
                 let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
                 
@@ -725,9 +640,11 @@ impl LookupU16Vec {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(segment as usize).unwrap(),
             State(1) => self.table_state1.get(segment as usize).unwrap(),
+            // State(0) => &self.table_state0[segment as usize],
+            // State(1) => &self.table_state1[segment as usize],            
             State(_) => panic!("yyy")
         };
-        (newstate.clone(), result.clone())
+        (*newstate, result.clone())
     }
 }
 
@@ -743,7 +660,7 @@ impl LookupU16Hash {
         let mut table_state0 = HashMap::new();
         let mut table_state1 = HashMap::new();
     
-        for lastbit in vec![true, false]{
+        for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
                 let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
                 
@@ -779,11 +696,11 @@ impl LookupU16Hash {
 
     pub fn lookup(&self, s: State, segment: u16) -> (State, FsmResult) {
         let (newstate, result) = match s {
-            State(0) => self.table_state0.get(&(segment as u16)).unwrap(),
-            State(1) => self.table_state1.get(&(segment as u16)).unwrap(),
+            State(0) => self.table_state0.get(&(segment)).unwrap(),
+            State(1) => self.table_state1.get(&(segment)).unwrap(),
             State(_) => panic!("yyy")
         };
-        (newstate.clone(), result.clone())
+        (*newstate, result.clone())
     }
 }
 

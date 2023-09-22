@@ -81,6 +81,64 @@ pub fn bitslice_to_fibonacci(b: &MyBitSlice) -> u64{
     sum
 }
 
+/// 
+pub fn bitslice_to_fibonacci3(b: &MyBitSlice) -> u64{
+    // omits the initial 1, i.e.
+    // fib = [1,2,3,5,...]
+    // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
+    // println!("{:?}", fib);
+    // b.ends_with(&[true, true].into());
+    if b.len() > 64 {
+        panic!("fib-codes cant be longer than 64bit, something is wrong!");
+    }
+    // TODO make sure its a proper fib-encoding (no 11 except the end)
+    let mut sum = 0;
+    // for (bit, f) in izip!(&b[..b.len()-1], FIB64) {
+    for i in 0..b.len()-1 {
+        sum+= FIB64[i]* (b[i] as u64);
+    }
+    sum
+}
+
+/// 
+pub fn bitslice_to_fibonacci2(b: &MyBitSlice) -> u64{
+    // omits the initial 1, i.e.
+    // fib = [1,2,3,5,...]
+    // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
+    // println!("{:?}", fib);
+    // b.ends_with(&[true, true].into());
+    if b.len() > 64 {
+        panic!("fib-codes cant be longer than 64bit, something is wrong!");
+    }
+    // TODO make sure its a proper fib-encoding (no 11 except the end)
+    let mut sum = 0;
+    for ix in b[..b.len()-1].iter_ones() {
+        sum+=FIB64[ix];
+    }
+    sum
+}
+
+/// 
+pub fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
+    // omits the initial 1, i.e.
+    // fib = [1,2,3,5,...]
+    // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
+    // println!("{:?}", fib);
+    // b.ends_with(&[true, true].into());
+    if b.len() > 64 {
+        panic!("fib-codes cant be longer than 64bit, something is wrong!");
+    }
+    // TODO make sure its a proper fib-encoding (no 11 except the end)
+    // let mut sum = 0;
+    let sum = b[..b.len()-1]
+        .iter()
+        .by_vals()
+        .enumerate()
+        .filter_map(|(ix, bit)| if bit {Some(FIB64[ix])} else {None})
+        .sum();
+    sum
+}
+
 /// Decoder for Fibonacci encoded integer sequences
 /// 
 /// Constructed from a bufffer (a binary sequence) which is gradually processed
@@ -127,15 +185,15 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
 
-        let mut lastbit = false;
+        let mut prev_bit = false;
         let mut accumulator = 0;
         let current_slice = &self.buffer[self.current_pos..];
         // println!("currentslice {:?}", current_slice);
-        for (idx, b) in current_slice.iter().by_vals().enumerate() {
+        for (idx, current_bit) in current_slice.iter().by_vals().enumerate() {
             if idx > 64 {
                 panic!("fib-codes cant be longer than 64bit, something is wrong!");
             }
-            match (lastbit, b) {
+            match (prev_bit, current_bit) {
                 // current bit set, but not 11
                 (false, true) => {
                     accumulator += FIB64[idx];
@@ -146,9 +204,9 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
                     self.current_pos += hit_len; 
                     return Some(accumulator);
                 }
-                (false, false) | (true, false) => {}
+                (false, false) | (true, false) => {}  // current bit is zero, nothing to add
             }
-            lastbit = b
+            prev_bit = current_bit
         }
         None
     }
@@ -326,41 +384,40 @@ mod test {
 
     #[test]
     fn test_bitslice_to_fibonacci(){
-        let v: Vec<bool> = vec![1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 1, 1];
+
         assert_eq!(
-            bitslice_to_fibonacci(&b),
+            bitslice_to_fibonacci(b),
             1
         );
 
-        let v: Vec<bool> = vec![0,1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 0, 1, 1];
+
         assert_eq!(
             bitslice_to_fibonacci(&b),
             2
         );
-        let v: Vec<bool> = vec![0,0,1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 0,0,1, 1];
+
         assert_eq!(
             bitslice_to_fibonacci(&b),
             3
         );
 
-        let v: Vec<bool> = vec![1,0,1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 1,0, 1, 1];
         assert_eq!(
             bitslice_to_fibonacci(&b),
             4
         );
 
-        let v: Vec<bool> = vec![1,0,0,0,0,1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 1,0,0,0,0,1,1];
+
         assert_eq!(
             bitslice_to_fibonacci(&b),
             14
         );
-        let v: Vec<bool> = vec![1,0,1,0,0,1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+
+        let b = bits![u8, Msb0; 1,0,1,0,0,1,1];
         assert_eq!(
             bitslice_to_fibonacci(&b),
             17
@@ -381,20 +438,13 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed")]
-    fn test_bitslice_to_fibonacci_wrong_encoding(){
-        // something with a 11 in the middle. this should not be decoded
-        let v: Vec<bool> = vec![1,0,1,1,0,1,1].iter().map(|x|*x==1).collect();
-        let _b: MyBitVector  = BitVec::from_iter(v.into_iter());
-    }
-
-    #[test]
     fn test_myfib_decoder() {
-        let v: Vec<bool> = vec![0,0,1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        // let v: Vec<bool> = vec![0,0,1,1].iter().map(|x|*x==1).collect();
+        // let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 0,0,1,1];
 
         // println!("full : {:?}", b);
-        let mut my = FibonacciDecoder {buffer: b.as_bitslice(), current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0};
 
         assert_eq!(
             my.next(), 
@@ -408,11 +458,10 @@ mod test {
 
     #[test]
     fn test_myfib_decoder_consecutive_ones() {
-        let v: Vec<bool> = vec![0,0,1,1,1,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 0,0,1,1,1,1];
 
         println!("full : {:?}", b);
-        let mut my = FibonacciDecoder {buffer: b.as_bitslice(), current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0};
 
         assert_eq!(
             my.next(), 
@@ -421,17 +470,19 @@ mod test {
         assert_eq!(
             my.next(), 
             Some(1)
-
         );
+        assert_eq!(
+            my.next(), 
+            None
+        );        
     }
 
     #[test]
     fn test_myfib_decoder_nothing() {
-        let v: Vec<bool> = vec![0,0,1,0,1,0,1].iter().map(|x|*x==1).collect();
-        let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 0,0,1,0,1,0,1];
 
         println!("full : {:?}", b);
-        let mut my = FibonacciDecoder {buffer: b.as_bitslice(), current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0};
 
         assert_eq!(
             my.next(), 

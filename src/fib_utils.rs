@@ -23,7 +23,7 @@ fn extended_fibonacci_right_shift_slow(x: u64, k: usize) -> u64 {
     neg_fib.insert(-2, 0);
     for i in 3..32 {
         let idx = -i;
-        let f = neg_fib.get(&(idx+2)).unwrap() - neg_fib.get(&(idx+1)).unwrap();
+        // let f = neg_fib.get(&(idx+2)).unwrap() - neg_fib.get(&(idx+1)).unwrap();
         // neg_fib.insert(idx, f);
 
         // nevermind, somehow the paper treats everything with i<-1 as F(i) = 0
@@ -59,7 +59,7 @@ fn extended_fibonacci_right_shift_slow(x: u64, k: usize) -> u64 {
     // decode netagive part
     let mut neg_acc = 0;
     for (i, b) in lowbits.iter().by_vals().enumerate() {
-        let fib_ix = -1 * (lowbits.len() - i ) as i32;
+        let fib_ix = -((lowbits.len() - i ) as i32);
         if b {
             neg_acc += neg_fib[&fib_ix];
         }
@@ -187,8 +187,8 @@ pub (crate) fn fibonacci_left_shift(n: u64 ,k: usize) -> u64 {
         k => (FIB64[k-1], FIB64[k-2])
     };
 
-    let shifted = f_km1 * n + f_km2 * FIB_EXT_LEFT_1[n as usize];
-    shifted
+    // shifted:
+    f_km1 * n + f_km2 * FIB_EXT_LEFT_1[n as usize]
 }
 
 #[test]

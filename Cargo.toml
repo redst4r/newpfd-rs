@@ -25,6 +25,6 @@ num = "0.4"
 [dev-dependencies]
 criterion = "0.5"
 
-# [[bench]]
-# name = "my_benchmark"
-# harness = false
+[[bench]]
+name = "my_benchmark"
+harness = false
