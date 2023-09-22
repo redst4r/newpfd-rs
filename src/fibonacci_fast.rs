@@ -245,12 +245,9 @@ pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64>
 /// operating on 8bit seqgments
 /// we explicityl chop the bitstream into u8-segments
 /// -> each segment can be represented by a number, which solves the problem of slow hashmap access
-pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
+pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>, table: &impl U8Lookup) -> Vec<u64> {
 
     let segment_size = 8;
-    // let (t0, t1) = create_lookup_u8();
-    let table = LookupU8Vec::new();
-    // let table = LookupU8Hash::new();
 
     let mut decoded_numbers = Vec::new();
     let mut n_chunks = stream.len() / segment_size;
@@ -313,12 +310,10 @@ pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
 /// operating on 16bit seqgments
 /// we explicityl chop the bitstream into u8-segments
 /// -> each segment can be represented by a number, which solves the problem of slow hashmap access
-pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
+pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>, table: &impl U16Lookup) -> Vec<u64> {
 
     // println!("Total stream {}", bitstream_to_string(&stream));
     let segment_size = 16;
-    let table = LookupU16Vec::new();
-    // let table = LookupU16Hash::new();
 
     let mut decoded_numbers = Vec::new();
     let mut n_chunks = stream.len() / segment_size;
@@ -373,7 +368,6 @@ pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
         // 
         for &num in result.numbers.iter() {
             if len > 0 {  // some leftover from the previous segment
-                // println!("{}", n);
                 n += fibonacci_left_shift(num, len);
             }
             else {
@@ -402,12 +396,13 @@ fn test_fast_decode() {
     // let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,0,1,1,1,0,0,1,0].to_bitvec();
     // let r = fast_decode(bits, 8);
     // assert_eq!(r, vec![4,7, 86]);
-
     let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,0,1,1,1,0,0,1,0].to_bitvec();
-    let r = fast_decode_u8(bits.clone());
+    let table = LookupU8Vec::new();
+    let r = fast_decode_u8(bits.clone(), &table);
     assert_eq!(r, vec![4,7, 86]);
 
-    let r = fast_decode_u16(bits);
+    let table = LookupU16Vec::new();
+    let r = fast_decode_u16(bits, &table);
     assert_eq!(r, vec![4,7, 86]);    
 }
 
@@ -419,10 +414,11 @@ fn test_fast_decode_111_at_segment_border() {
     let r = fast_decode(bits.clone(), 8);
     assert_eq!(r, vec![21, 22]);
 
-    let r = fast_decode_u8(bits.clone());
+    let table = LookupU8Vec::new();
+    let r = fast_decode_u8(bits.clone(), &table);
     assert_eq!(r, vec![21, 22]);    
 
-    let r = fast_decode_u8(bits);
+    let r = fast_decode_u8(bits, &table);
     assert_eq!(r, vec![21, 22]);      
 }
 
@@ -441,7 +437,8 @@ fn test_correctness() {
     let dec = FibonacciDecoder::new(&b);
     let x1: Vec<_> = dec.collect();
     let x2 = fast_decode(b_fast.clone(), 8);
-    let x3 = fast_decode_u8(b_fast.clone());
+    let table = LookupU8Vec::new();
+    let x3 = fast_decode_u8(b_fast.clone(), &table);
 
     println!("{:?}", bitstream_to_string(&b_fast));
 
@@ -461,28 +458,38 @@ fn test_fast_speed() {
         b_fast.push(bit);
     }    
     // let x2 = fast_decode(b_fast.clone(), 8);
-    let x2 = fast_decode_u8(b_fast.clone());
+    let table = LookupU8Vec::new();
+    let x2 = fast_decode_u8(b_fast.clone(), &table);
 
     println!("{}", x2.iter().sum::<u64>());
 
     // let x2 = fast_decode(b_fast.clone(), 8);
-    let x2 = fast_decode_u16(b_fast.clone());
+    let table = LookupU16Vec::new();
+    let x2 = fast_decode_u16(b_fast.clone(), &table);
     println!("{}", x2.iter().sum::<u64>())    
 
 }
 /// just for debugging purpose
-fn bitstream_to_string<T:BitStore>(buffer: &BitSlice<T, Lsb0>) -> String{
+pub fn bitstream_to_string<T:BitStore>(buffer: &BitSlice<T, Lsb0>) -> String{
     let s = buffer.iter().map(|x| if *x{"1"} else {"0"}).join("");
     s
 }
 
+/// Fast Fibonacci decoding lookup table for 16bit segments
+pub trait U8Lookup {
+    /// given the state of the last decoding operation and the new segment, returns
+    /// the (precomputed) new state and decoding result
+    fn lookup(&self, s: State, segment: u8) -> (State, &FsmResult);
+}
 
 /// Vector based lookup table for u8
-struct LookupU8Vec {
+pub struct LookupU8Vec {
     table_state0: Vec<(State, FsmResult)>,
     table_state1: Vec<(State, FsmResult)>,
 }
 impl LookupU8Vec {
+    /// create a new Lookup table for fast fibonacci decoding using 8bit segments
+    /// This implementation uses a Vec
     pub fn new() -> Self {
         let segment_size = 8;
 
@@ -522,8 +529,10 @@ impl LookupU8Vec {
         }
         LookupU8Vec { table_state0, table_state1}
     }
+}
 
-    pub fn lookup(&self, s: State, segment: u8) -> (State, &FsmResult) {
+impl U8Lookup for LookupU8Vec {
+    fn lookup(&self, s: State, segment: u8) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(segment as usize).unwrap(),
             State(1) => self.table_state1.get(segment as usize).unwrap(),
@@ -533,11 +542,15 @@ impl LookupU8Vec {
     }
 }
 
-struct LookupU8Hash {
+
+///
+pub struct LookupU8Hash {
     table_state0: HashMap<u8, (State, FsmResult)>,
     table_state1: HashMap<u8, (State, FsmResult)>,
 }
 impl LookupU8Hash {
+    /// create a new Lookup table for fast fibonacci decoding using 8bit segments
+    /// This implementation uses a HashMap
     pub fn new() -> Self {
         let segment_size = 8;
 
@@ -577,8 +590,10 @@ impl LookupU8Hash {
         }
         LookupU8Hash { table_state0, table_state1}
     }
+}
 
-    pub fn lookup(&self, s: State, segment: u8) -> (State, &FsmResult) {
+impl U8Lookup for LookupU8Hash {
+    fn lookup(&self, s: State, segment: u8) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(&(segment)).unwrap(),
             State(1) => self.table_state1.get(&(segment)).unwrap(),
@@ -588,13 +603,20 @@ impl LookupU8Hash {
     }
 }
 
-
+/// Fast Fibonacci decoding lookup table for 16bit segments
+pub trait U16Lookup {
+    /// given the state of the last decoding operation and the new segment, returns
+    /// the (precomputed) new state and decoding result
+    fn lookup(&self, s: State, segment: u16) -> (State, &FsmResult);
+}
 /// Vector based lookup table for u8
-struct LookupU16Vec {
+pub struct LookupU16Vec {
     table_state0: Vec<(State, FsmResult)>,
     table_state1: Vec<(State, FsmResult)>,
 }
 impl LookupU16Vec {
+    /// create a new Lookup table for fast fibonacci decoding using 16bit segments
+    /// This implementation uses a vec
     pub fn new() -> Self {
         let segment_size = 16;
 
@@ -634,8 +656,10 @@ impl LookupU16Vec {
         }
         LookupU16Vec { table_state0, table_state1}
     }
+}
 
-    pub fn lookup(&self, s: State, segment: u16) -> (State, &FsmResult) {
+impl U16Lookup for LookupU16Vec {
+    fn lookup(&self, s: State, segment: u16) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(segment as usize).unwrap(),
             State(1) => self.table_state1.get(segment as usize).unwrap(),
@@ -647,12 +671,14 @@ impl LookupU16Vec {
     }
 }
 
-/// Vector based lookup table for u8
-struct LookupU16Hash {
+/// hash based lookup table for u8
+pub struct LookupU16Hash {
     table_state0: HashMap<u16, (State, FsmResult)>,
     table_state1: HashMap<u16, (State, FsmResult)>,
 }
 impl LookupU16Hash {
+    /// create a new Lookup table for fast fibonacci decoding using 16bit segments
+    /// This implementation uses a HashMap
     pub fn new() -> Self {
         let segment_size = 16;
 
@@ -692,8 +718,10 @@ impl LookupU16Hash {
         }
         LookupU16Hash { table_state0, table_state1}
     }
+}
 
-    pub fn lookup(&self, s: State, segment: u16) -> (State, &FsmResult) {
+impl U16Lookup for LookupU16Hash {
+    fn lookup(&self, s: State, segment: u16) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(&(segment)).unwrap(),
             State(1) => self.table_state1.get(&(segment)).unwrap(),
@@ -707,7 +735,7 @@ impl LookupU16Hash {
 #[cfg(test)]
 mod testing_lookups {
     use bitvec::prelude::*;
-    use crate::fibonacci_fast::{FsmResult, State, LookupU8Hash, LookupU8Vec, LookupU16Vec, LookupU16Hash};
+    use crate::fibonacci_fast::{FsmResult, State, LookupU8Hash, LookupU8Vec, LookupU16Vec, LookupU16Hash, U8Lookup, U16Lookup};
 
     #[test]
     fn test_u8vec() {

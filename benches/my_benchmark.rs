@@ -3,7 +3,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use fibonacci_codec::Encode;
 use newpfd::fib_utils::random_fibonacci_stream;
 use newpfd::fibonacci::{bits_from_table, FibonacciDecoder, bitslice_to_fibonacci, bitslice_to_fibonacci2, bitslice_to_fibonacci3, bitslice_to_fibonacci4};
-use newpfd::fibonacci_fast::{fast_decode, fast_decode_u8, fast_decode_u16};
+use newpfd::fibonacci_fast::{fast_decode, fast_decode_u8, fast_decode_u16, LookupU8Vec, LookupU16Vec, LookupU8Hash, LookupU16Hash};
 use newpfd::fibonacci_old::fib_enc_multiple;
 use newpfd::{newpfd_bitvec::{encode, decode}, fibonacci::FIB64};
 use rand::distributions::{Distribution, Uniform};
@@ -174,14 +174,28 @@ fn fast_decode_vs_regular(c: &mut Criterion){
         |b| b.iter(|| fast_decode(black_box(data_fast.clone()), black_box(8)))
     );
 
+    let table = LookupU8Vec::new();
     c.bench_function(
-        &format!("fast u8-decode"),
-        |b| b.iter(|| fast_decode_u8(black_box(data_fast.clone())))
+        &format!("fast vec u8-decode"),
+        |b| b.iter(|| fast_decode_u8(black_box(data_fast.clone()), black_box(&table)))
     );
 
+    let table = LookupU16Vec::new();
     c.bench_function(
-        &format!("fast u16-decode"),
-        |b| b.iter(|| fast_decode_u16(black_box(data_fast.clone())))
+        &format!("fast vec u16-decode"),
+        |b| b.iter(|| fast_decode_u16(black_box(data_fast.clone()), black_box(&table)))
+    );
+
+    let table = LookupU8Hash::new();
+    c.bench_function(
+        &format!("fast hash u8-decode"),
+        |b| b.iter(|| fast_decode_u8(black_box(data_fast.clone()), black_box(&table)))
+    );
+
+    let table = LookupU16Hash::new();
+    c.bench_function(
+        &format!("fast hash u16-decode"),
+        |b| b.iter(|| fast_decode_u16(black_box(data_fast.clone()), black_box(&table)))
     );
 
 
