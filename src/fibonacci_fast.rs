@@ -288,7 +288,7 @@ pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
         state = newstate;
 
         // 
-        for num in result.numbers {
+        for &num in result.numbers.iter() {
             if len > 0 {  // some leftover from the previous segment
                 // println!("{}", n);
                 n += fibonacci_left_shift(num, len);
@@ -371,7 +371,7 @@ pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>) -> Vec<u64> {
         state = newstate;
 
         // 
-        for num in result.numbers {
+        for &num in result.numbers.iter() {
             if len > 0 {  // some leftover from the previous segment
                 // println!("{}", n);
                 n += fibonacci_left_shift(num, len);
@@ -465,7 +465,6 @@ fn test_fast_speed() {
 
     println!("{}", x2.iter().sum::<u64>());
 
-
     // let x2 = fast_decode(b_fast.clone(), 8);
     let x2 = fast_decode_u16(b_fast.clone());
     println!("{}", x2.iter().sum::<u64>())    
@@ -524,13 +523,13 @@ impl LookupU8Vec {
         LookupU8Vec { table_state0, table_state1}
     }
 
-    pub fn lookup(&self, s: State, segment: u8) -> (State, FsmResult) {
+    pub fn lookup(&self, s: State, segment: u8) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(segment as usize).unwrap(),
             State(1) => self.table_state1.get(segment as usize).unwrap(),
             State(_) => panic!("yyy")
         };
-        (*newstate, result.clone())
+        (*newstate, result)
     }
 }
 
@@ -579,13 +578,13 @@ impl LookupU8Hash {
         LookupU8Hash { table_state0, table_state1}
     }
 
-    pub fn lookup(&self, s: State, segment: u8) -> (State, FsmResult) {
+    pub fn lookup(&self, s: State, segment: u8) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(&(segment)).unwrap(),
             State(1) => self.table_state1.get(&(segment)).unwrap(),
             State(_) => panic!("yyy")
         };
-        (*newstate, result.clone())
+        (*newstate, result)
     }
 }
 
@@ -636,7 +635,7 @@ impl LookupU16Vec {
         LookupU16Vec { table_state0, table_state1}
     }
 
-    pub fn lookup(&self, s: State, segment: u16) -> (State, FsmResult) {
+    pub fn lookup(&self, s: State, segment: u16) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(segment as usize).unwrap(),
             State(1) => self.table_state1.get(segment as usize).unwrap(),
@@ -644,7 +643,7 @@ impl LookupU16Vec {
             // State(1) => &self.table_state1[segment as usize],            
             State(_) => panic!("yyy")
         };
-        (*newstate, result.clone())
+        (*newstate, result)
     }
 }
 
@@ -694,13 +693,13 @@ impl LookupU16Hash {
         LookupU16Hash { table_state0, table_state1}
     }
 
-    pub fn lookup(&self, s: State, segment: u16) -> (State, FsmResult) {
+    pub fn lookup(&self, s: State, segment: u16) -> (State, &FsmResult) {
         let (newstate, result) = match s {
             State(0) => self.table_state0.get(&(segment)).unwrap(),
             State(1) => self.table_state1.get(&(segment)).unwrap(),
             State(_) => panic!("yyy")
         };
-        (*newstate, result.clone())
+        (*newstate, result)
     }
 }
 
@@ -718,13 +717,13 @@ mod testing_lookups {
 
         assert_eq!(
             t.lookup(State(0), i), 
-            (State(1), FsmResult {numbers: vec![4], u:7, lu: 4})
+            (State(1), &FsmResult {numbers: vec![4], u:7, lu: 4})
         );
 
         let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
         assert_eq!(
             t.lookup(State(1), i), 
-            (State(1), FsmResult {numbers: vec![0, 2], u:7, lu: 4})
+            (State(1), &FsmResult {numbers: vec![0, 2], u:7, lu: 4})
         );
     }
 
@@ -735,13 +734,13 @@ mod testing_lookups {
 
         assert_eq!(
             t.lookup(State(0), i), 
-            (State(1), FsmResult {numbers: vec![4], u:7, lu: 4})
+            (State(1), &FsmResult {numbers: vec![4], u:7, lu: 4})
         );
 
         let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
         assert_eq!(
             t.lookup(State(1), i), 
-            (State(1), FsmResult {numbers: vec![0, 2], u:7, lu: 4})
+            (State(1), &FsmResult {numbers: vec![0, 2], u:7, lu: 4})
         );
     } 
 
@@ -752,13 +751,13 @@ mod testing_lookups {
 
         assert_eq!(
             t.lookup(State(0), i), 
-            (State(1), FsmResult {numbers: vec![4, 28], u:5, lu: 4})
+            (State(1), &FsmResult {numbers: vec![4, 28], u:5, lu: 4})
         );
 
         let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
         assert_eq!(
             t.lookup(State(1), i), 
-            (State(1), FsmResult {numbers: vec![0, 2, 28], u:5, lu: 4})
+            (State(1), &FsmResult {numbers: vec![0, 2, 28], u:5, lu: 4})
         );
     }
     #[test]
@@ -768,13 +767,13 @@ mod testing_lookups {
 
         assert_eq!(
             t.lookup(State(0), i), 
-            (State(1), FsmResult {numbers: vec![4, 28], u:5, lu: 4})
+            (State(1), &FsmResult {numbers: vec![4, 28], u:5, lu: 4})
         );
 
         let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
         assert_eq!(
             t.lookup(State(1), i), 
-            (State(1), FsmResult {numbers: vec![0, 2, 28], u:5, lu: 4})
+            (State(1), &FsmResult {numbers: vec![0, 2, 28], u:5, lu: 4})
         );
     }    
 }
