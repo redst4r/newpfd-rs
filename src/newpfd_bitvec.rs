@@ -122,7 +122,7 @@ pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (MyBit
 
 
 // /// just for debugging purpose
-// fn bitstream_to_string(buffer: &bv::BitSlice<u8, bv::Msb0>) -> String{
+// fn bitstream_to_string<T:BitStore>(buffer: &BitSlice<T, Lsb0>) -> String{
 //     let s = buffer.iter().map(|x| if *x{"1"} else {"0"}).join("");
 //     s
 // }

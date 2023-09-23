@@ -480,7 +480,6 @@ pub fn bitvec_single_fibbonacci_decode(x: &mut BitVec) -> (u64, BitVec){
         let error = format!("error in decoding {} {:?}",x.len(), x);
         panic!("{}", &error);
     }
-
 }
 
 #[cfg(test)]
