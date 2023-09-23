@@ -24,6 +24,7 @@ num = "0.4"
 
 [dev-dependencies]
 criterion = "0.5"
+pretty_assertions = "1"
 
 [[bench]]
 name = "my_benchmark"
