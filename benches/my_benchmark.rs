@@ -1,9 +1,10 @@
+use bitvec::slice::BitSlice;
 use bitvec::{vec::BitVec, prelude::Msb0, prelude::Lsb0};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use fibonacci_codec::Encode;
 use newpfd::fib_utils::random_fibonacci_stream;
 use newpfd::fibonacci::{bits_from_table, FibonacciDecoder, bitslice_to_fibonacci, bitslice_to_fibonacci2, bitslice_to_fibonacci3, bitslice_to_fibonacci4};
-use newpfd::fibonacci_fast::{fast_decode, fast_decode_u8, fast_decode_u16, LookupU8Vec, LookupU16Vec, LookupU8Hash, LookupU16Hash};
+use newpfd::fibonacci_fast::{fast_decode, fast_decode_u8, fast_decode_u16, LookupU8Vec, LookupU16Vec, LookupU8Hash, LookupU16Hash, FastFibonacciDecoder};
 use newpfd::fibonacci_old::fib_enc_multiple;
 use newpfd::{newpfd_bitvec::{encode, decode}, fibonacci::FIB64};
 use rand::distributions::{Distribution, Uniform};
@@ -162,7 +163,7 @@ fn fibonacci_bitslice(c: &mut Criterion){
 fn fast_decode_vs_regular(c: &mut Criterion){
 
     // create a long fib string
-    let data = random_fibonacci_stream(1_000_000, 1, 255);
+    let data = random_fibonacci_stream(1_000_000, 1, 10000);
     // make a copy for fast decoder
     let mut data_fast: BitVec<usize, Lsb0> = BitVec::new();
     for bit in data.iter().by_vals() {
@@ -198,6 +199,19 @@ fn fast_decode_vs_regular(c: &mut Criterion){
         |b| b.iter(|| fast_decode_u16(black_box(data_fast.clone()), black_box(&table)))
     );
 
+
+    fn dummy_fast_iter(data_fast: &BitSlice<usize, Lsb0>, table: &LookupU16Vec) -> Vec<u64> {
+        let f = FastFibonacciDecoder::new(&data_fast.clone(), table);
+        let x: Vec<_> = f.collect();
+        x
+    }
+
+    let table = LookupU16Vec::new();
+    c.bench_function(
+        &format!("fast u16vec Iterator"),
+        |b| b.iter(||dummy_fast_iter(black_box(&data_fast.clone()), black_box(&table)))
+    );
+ 
 
     fn dummy(bv: BitVec<u8, Msb0>) -> Vec<u64> {
         let dec = FibonacciDecoder::new(&bv);

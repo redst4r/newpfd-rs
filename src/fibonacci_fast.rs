@@ -24,6 +24,237 @@ use bitvec::prelude::*;
 use crate::{fibonacci::FIB64, fib_utils::fibonacci_left_shift};
 use std::cmp;
 
+/// rr
+pub struct FastFibonacciDecoder<'a>  {
+    bistream: &'a BitSlice<usize, Lsb0>,
+    position: usize,
+    lookup_table: &'a LookupU16Vec,
+    segment_size: usize,
+    current_buffer: Vec<Option<u64>>,     // decoded numbers not yet emitted
+    current_backtrack: Vec<Option<usize>>,  // for each decoded number in current_buffer, remember how many bits its encoding was
+    state: State,
+    decoding_state: DecodingState,
+    last_emission_last_position: Option<usize>, //position in bitstream after the last emission; None if we exhausted the stream completely
+
+}
+impl <'a>  FastFibonacciDecoder<'a>  {
+    ///
+    pub fn new(bistream: &'a BitSlice<usize, Lsb0>, lookup_table: &'a LookupU16Vec) -> Self {
+        FastFibonacciDecoder {
+            bistream,
+            position: 0,
+            lookup_table: lookup_table,
+            current_buffer: Vec::new(),
+            current_backtrack: Vec::new(),
+            segment_size: 16,
+            state: State(0),
+            decoding_state: DecodingState::new(),
+            last_emission_last_position: Some(0),
+        }
+    }
+    /// gets the next segment out of the stream
+    /// will advance the stream
+    fn get_next_segment(&mut self) ->  &BitSlice<usize, Lsb0> {
+        let segment = &self.bistream[self.position..self.position+self.segment_size];
+        self.position += self.segment_size; 
+        segment
+    }
+
+    /// return the remaining bitstream after the last yielded number
+    /// if the bitstream isfull exhausted (i.e. no remainder), return None
+    pub fn get_remaining_buffer(&self) -> Option<&'a BitSlice<usize, Lsb0>>{
+        match self.last_emission_last_position {
+            Some(pos) =>  Some(&self.bistream[pos+1..]),
+            None => None
+        }
+    }
+}
+
+/// The iterator is a bit complicated! We cant decode a single number, 
+/// only an entire segment, hence we need to buffer the decoded numbers, yielding 
+/// them one by one.
+/// 
+/// 
+impl <'a>Iterator for FastFibonacciDecoder<'a> {
+    type Item=u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+
+        // if self.current_buffer.is_empty() {  // should be: while buffer is empty, keep loading new segments!
+        while self.current_buffer.is_empty() {  // should be: while buffer is empty, keep loading new segments!
+
+            // println!("Empty buffer");
+            // try to pull in the next segment
+            // let segment = self.get_next_segment();
+            let start = self.position;
+            let end = cmp::min(self.position+self.segment_size, self.bistream.len());
+            let segment = &self.bistream[start..end];
+            // println!("Loading new segment: {}", bitstream_to_string(segment));
+            self.position += self.segment_size; 
+
+            if segment.is_empty() {
+                return None
+            }
+
+            // decode this segment
+            let segment_u16 = segment.load_be::<u16>();
+        
+            let (newstate, result) = self.lookup_table.lookup(self.state, segment_u16);
+            self.state = newstate;   
+            self.decoding_state.update(result);
+
+            // println!("Decoding state: {:?}", self.decoding_state);
+            // move all decoded numbers into the emission buffer
+            for el in self.decoding_state.decoded_numbers.drain(0..self.decoding_state.decoded_numbers.len()) {
+                self.current_buffer.push(Some(el))
+            }
+            // move all decoded numbers starts into the emission buffer
+            // no need to delete in result, gets dropped
+            for &el in result.number_end_in_segment.iter() {
+                self.current_backtrack.push(Some(el+start)); // turn the relative (to segment start) into an absolute postion
+            }            
+            assert!(self.decoding_state.decoded_numbers.is_empty());
+
+            // println!("current buffer: {:?}", self.current_buffer);
+
+            if segment.len() == self.segment_size {
+                // println!("Full segment");
+                // a full segment
+                // do nothing
+            } else {
+                // println!("partial segment");
+                // a truncated segment, i.e. the last segment
+                // push the terminator into the iterator to signal we;re done
+                self.current_buffer.push(None);
+                self.current_backtrack.push(None);
+            }
+        }
+        // } else {
+        //     println!("non-empty buffer: just yielding what we have already: {:?} starts: {:?}", self.current_buffer, self.current_backtrack);
+        // }
+        let el = self.current_buffer.remove(0); // TODO: expensive, Deque instead?
+        let _dummy = self.current_backtrack.remove(0); // TODO: expensive, Deque instead?
+        self.last_emission_last_position = _dummy;
+        // println!("State after emission: Position {}, LastPos {:?}, Buffer {:?} starts: {:?}", self.position, self.last_emission_last_position, self.current_buffer, self.current_backtrack);
+
+        el
+    }
+}
+
+#[cfg(test)]
+mod test_iter {
+    use super::*;
+    use pretty_assertions::{assert_eq, assert_ne};
+
+    #[test]
+    fn test_iter() {
+        // just a 3number stream, trailing stuff
+        let bits = bits![usize, Lsb0; 
+            1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,
+            0,1,1,1,0,0,1,0].to_bitvec();
+        let table= LookupU16Vec::new();
+        let f = FastFibonacciDecoder::new(&bits, &table);
+
+        let x = f.collect::<Vec<_>>();
+        assert_eq!(x, vec![4,7, 86]);
+    }
+
+    #[test]
+    fn test_iter_multiple_segments() {
+        let table= LookupU16Vec::new();
+
+        // what if not a single number is decoded per segment
+        let bits = bits![usize, Lsb0; 
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+            0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0].to_bitvec();
+        let mut f = FastFibonacciDecoder::new(&bits, &table);
+
+        // let x = f.collect::<Vec<_>>();
+        assert_eq!(f.next(), Some(4181));
+        assert_eq!(f.get_remaining_buffer(), Some(&bits[19..]));
+
+
+        let bits = bits![usize, Lsb0; 
+            0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+            1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0].to_bitvec();
+        let mut f = FastFibonacciDecoder::new(&bits, &table);
+
+        // let x = f.collect::<Vec<_>>();
+        assert_eq!(f.next(), Some(1597));
+        assert_eq!(f.get_remaining_buffer(), Some(&bits[17..]));        
+    }
+
+    #[test]
+    fn test_iter_exact_borders() {
+
+        // just a 3number stream, no trailing
+        let bits = bits![usize, Lsb0; 
+            1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,  // 4, 7, 86
+            0,1,1,1,0,0,1,1,0,1,1,1,0,0,1,1  // 3, 2, 4
+        ].to_bitvec();
+        let table= LookupU16Vec::new();
+
+        let f = FastFibonacciDecoder::new(&bits, &table);
+
+        let x = f.collect::<Vec<_>>();
+        assert_eq!(x, vec![4,7, 86, 6,2 ,6]);
+    }
+    #[test]
+    fn test_iter_remaining_stream() {
+        // just a 3number stream, no trailing
+        let bits = bits![usize, Lsb0; 
+            1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,
+            0,1,1,1,0,0,1,0].to_bitvec();
+        let table= LookupU16Vec::new();
+        
+        let mut f = FastFibonacciDecoder::new(&bits, &table);
+        assert_eq!(f.next(), Some(4));
+        assert_eq!(f.get_remaining_buffer(), Some(&bits[4..]));
+
+        let mut f = FastFibonacciDecoder::new(&bits, &table);
+        assert_eq!(f.next(), Some(4));
+        assert_eq!(f.next(), Some(7));
+        assert_eq!(f.get_remaining_buffer(), Some(&bits[9..]));
+
+        let mut f = FastFibonacciDecoder::new(&bits, &table);
+        assert_eq!(f.next(), Some(4));
+        assert_eq!(f.next(), Some(7));
+        assert_eq!(f.next(), Some(86));
+        assert_eq!(f.get_remaining_buffer(), Some(&bits[19..]));
+
+        let mut f = FastFibonacciDecoder::new(&bits, &table);
+        assert_eq!(f.next(), Some(4));
+        assert_eq!(f.next(), Some(7));
+        assert_eq!(f.next(), Some(86));
+        assert_eq!(f.next(), None);
+        assert_eq!(f.get_remaining_buffer(), None);
+    }
+
+    #[test]
+    fn test_correctness_iter() {
+        use crate::fibonacci::FibonacciDecoder;
+        use crate::fib_utils::random_fibonacci_stream;
+        // use crate::newpfd_bitvec::bitstream_to_string;
+        let b = random_fibonacci_stream(100000, 1, 1000);
+        // let b = dummy_encode(vec![64, 11, 88]);
+        // make a copy for fast decoder
+        let mut b_fast: BitVec<usize, Lsb0> = BitVec::new();
+        for bit in b.iter().by_vals() {
+            b_fast.push(bit);
+        }
+        let dec = FibonacciDecoder::new(&b);
+        let x1: Vec<_> = dec.collect();
+
+        let table= LookupU16Vec::new();
+        
+        let f = FastFibonacciDecoder::new(&b_fast, &table);
+        let x2: Vec<_> = f.collect();
+
+        // println!("{:?}", bitstream_to_string(&b_fast));
+
+        assert_eq!(x1, x2);
+    }
+}
 
 /// used to remember the position in the bitvector and the partically decoded number
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Copy)]
@@ -36,6 +267,7 @@ pub struct State(pub usize);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodingResult {
     numbers: Vec<u64>, // fully decoded numbers from the segment
+    number_end_in_segment: Vec<usize>, // the position in the segment where that number started; undefined for the first number (as it couldve started in theh previous segment)
     /// Stores the partially decoded number left in hte segment
     u: u64,  // partially decoded number; i.e. anything that didnt have a delimiter so far, kind of the accumulator
     lu: usize,  // bitlength of U; i..e how many bits processed so far without hitting the delimieter
@@ -93,36 +325,40 @@ fn create_lookup(segment_size: usize) -> HashMap<(State, BitVec<usize, Lsb0>), (
 fn decode_with_remainder(bitstream: &BitSlice<usize, Lsb0>, lastbit_external: bool) -> DecodingResult{
 
     assert!(bitstream.len() < 64, "fib-codes cant be longer than 64bit, something is wrong!");
-
-    let mut lastbit = lastbit_external;
+    // println!("{}", bitstream_to_string(bitstream));
+    let mut prev_bit = lastbit_external;
     let mut decoded_ints = Vec::new();
+    let mut decoded_end_pos: Vec<usize> = Vec::new();
+
+    // let mut current_start = None; // already add the unknown starto f the first el
+
     let mut accum = 0_u64;
     let mut offset = 0;
-    for b in bitstream.iter().by_vals() {
-        match (lastbit, b) {
+    for (ix, b) in bitstream.iter().by_vals().enumerate() {
+        match (prev_bit, b) {
             (false, true) => {
                 accum+= FIB64[offset];
                 offset+=1;
-                lastbit = b;
+                prev_bit = b;
             }
             (true, true) => {
                 // found delimiter; Note, the bit has already been counted in acc
                 decoded_ints.push(accum);
-
+                decoded_end_pos.push(ix); // will be none the first iteration
                 // reset for next number
                 accum = 0;
                 offset = 0;
                 // BIG TRICK: we need to set lastbit=false for the next iteration; otherwise 011|11 picks up the next 11 as delimiter
-                lastbit=false;
+                prev_bit=false;
             }
             (false, false) | (true, false) => {
                 // nothing to add, jsut increase offset
                 offset+=1;
-                lastbit = b;
+                prev_bit = b;
             }
         }
     }
-    DecodingResult {numbers: decoded_ints, u: accum, lu: offset}
+    DecodingResult {numbers: decoded_ints, u: accum, lu: offset, number_end_in_segment: decoded_end_pos}
 }
 
 #[cfg(test)]
@@ -135,9 +371,10 @@ mod test_decode_with_remainder{
         // the exampel from the paper, Fig 9.4
         let bits = bits![usize, Lsb0; 0,1,1,1,1];
         let r = decode_with_remainder(bits, false);
-        assert_eq!(r.numbers, vec![2,1]);
-        assert_eq!(r.u, 0);
-        assert_eq!(r.lu, 0);
+        assert_eq!(
+            r, 
+            DecodingResult {numbers: vec![2,1], u: 0, lu:0, number_end_in_segment: vec![2,4]} 
+        );
     }
 
     #[test]
@@ -146,9 +383,10 @@ mod test_decode_with_remainder{
         // the exampel from the paper, Fig 9.4
         let bits = bits![usize, Lsb0; 0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1].to_bitvec();
         let r = decode_with_remainder(&bits, false);
-        assert_eq!(r.numbers, vec![21,22]);
-        assert_eq!(r.u, 0);
-        assert_eq!(r.lu, 0);
+        assert_eq!(
+            r, 
+            DecodingResult {numbers: vec![21,22], u: 0, lu:0, number_end_in_segment: vec![7,15]} 
+        );        
     }
 
     // #[test]
@@ -188,23 +426,35 @@ mod test_decode_with_remainder{
         // the exampel from the paper, Fig 9.4
         let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1];
         let r = decode_with_remainder(bits, false);
-        assert_eq!(r.numbers, vec![4,7]);
-        assert_eq!(r.u, 31);
-        assert_eq!(r.lu, 7);
+        assert_eq!(
+            r, 
+            DecodingResult {numbers: vec![4,7], u: 31, lu:7, number_end_in_segment: vec![3, 8,]} 
+        );   
 
         // the exampel from the paper, Fig 9.4
         // no remainder this time
         let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1];
         let r = decode_with_remainder(bits, false);
-        assert_eq!(r.numbers, vec![4,7]);
-        assert_eq!(r.u, 0);
-        assert_eq!(r.lu, 0);    
+        assert_eq!(
+            r, 
+            DecodingResult {numbers: vec![4,7], u: 0, lu:0, number_end_in_segment: vec![3, 8]} 
+        );  
+    }
+    #[test]
+    fn test_decode_with_remainder_starts() {
+        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1, 0,1,1,0,0,0];
+        let r = decode_with_remainder(bits, false);
+        assert_eq!(
+            r, 
+            DecodingResult {numbers: vec![4,7,2], u: 0, lu:3, number_end_in_segment: vec![3,8,11]} 
+        );  
     }
 }
 
 /// State of the decoding across multiple segments. Keeps track of completely 
 /// decoded and partially decoded numbers (which could be completed with the next segment)
 /// 
+#[derive(Debug)]
 struct DecodingState {
     decoded_numbers: Vec<u64>,  // completly decoded numbers across all segments so far
     n: u64,   // the partially decoded number from the last segment
@@ -815,7 +1065,7 @@ impl U16Lookup for LookupU16Hash {
 mod testing_lookups {
     use bitvec::prelude::*;
     use super::*;
-    use pretty_assertions::{assert_eq, assert_ne};
+    // use pretty_assertions::{assert_eq, assert_ne};
 
     #[test]
     fn test_u8vec() {
@@ -825,16 +1075,65 @@ mod testing_lookups {
 
         assert_eq!(
             t.lookup(State(0), i), 
-            (State(1), &DecodingResult {numbers: vec![4], u:7, lu: 4})
+            (State(1), &DecodingResult {numbers: vec![4], u:7, lu: 4, number_end_in_segment: vec![3]})
         );
 
         let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
         assert_eq!(
             t.lookup(State(1), i), 
-            (State(1), &DecodingResult {numbers: vec![0, 2], u:7, lu: 4})
+            (State(1), &DecodingResult {numbers: vec![0, 2], u:7, lu: 4, number_end_in_segment: vec![0, 3]})
         );      
     }
 
+    #[test]
+    fn test_u8hash() {
+        let t = LookupU8Hash::new();
+        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
+
+        assert_eq!(
+            t.lookup(State(0), i), 
+            (State(1), &DecodingResult {numbers: vec![4], u:7, lu: 4, number_end_in_segment: vec![3,]})
+        );
+
+        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
+        assert_eq!(
+            t.lookup(State(1), i), 
+            (State(1), &DecodingResult {numbers: vec![0, 2], u:7, lu: 4, number_end_in_segment: vec![0, 3]})
+        );
+    } 
+
+    #[test]
+    fn test_u16vec() {
+        let t = LookupU16Vec::new();
+        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+
+        assert_eq!(
+            t.lookup(State(0), i), 
+            (State(1), &DecodingResult {numbers: vec![4, 28], u:5, lu: 4, number_end_in_segment: vec![3, 11]})
+        );
+
+        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+        assert_eq!(
+            t.lookup(State(1), i), 
+            (State(1), &DecodingResult {numbers: vec![0, 2, 28], u:5, lu: 4, number_end_in_segment: vec![0,3,11]})
+        );
+    }
+    #[test]
+    fn test_u16hash() {
+        let t = LookupU16Hash::new();
+        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+
+        assert_eq!(
+            t.lookup(State(0), i), 
+            (State(1), &DecodingResult {numbers: vec![4, 28], u:5, lu: 4, number_end_in_segment: vec![3,11]})
+        );
+
+        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+        assert_eq!(
+            t.lookup(State(1), i), 
+            (State(1), &DecodingResult {numbers: vec![0, 2, 28], u:5, lu: 4, number_end_in_segment: vec![0,3,11]})
+        );
+    }
     #[test]
     fn test_decode_u8_vec() {
         let t = LookupU8Vec::new();
@@ -879,53 +1178,5 @@ mod testing_lookups {
         );  
     }
 
-    #[test]
-    fn test_u8hash() {
-        let t = LookupU8Hash::new();
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
-
-        assert_eq!(
-            t.lookup(State(0), i), 
-            (State(1), &DecodingResult {numbers: vec![4], u:7, lu: 4})
-        );
-
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
-        assert_eq!(
-            t.lookup(State(1), i), 
-            (State(1), &DecodingResult {numbers: vec![0, 2], u:7, lu: 4})
-        );
-    } 
-
-    #[test]
-    fn test_u16vec() {
-        let t = LookupU16Vec::new();
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
-
-        assert_eq!(
-            t.lookup(State(0), i), 
-            (State(1), &DecodingResult {numbers: vec![4, 28], u:5, lu: 4})
-        );
-
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
-        assert_eq!(
-            t.lookup(State(1), i), 
-            (State(1), &DecodingResult {numbers: vec![0, 2, 28], u:5, lu: 4})
-        );
-    }
-    #[test]
-    fn test_u16hash() {
-        let t = LookupU16Hash::new();
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
-
-        assert_eq!(
-            t.lookup(State(0), i), 
-            (State(1), &DecodingResult {numbers: vec![4, 28], u:5, lu: 4})
-        );
-
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
-        assert_eq!(
-            t.lookup(State(1), i), 
-            (State(1), &DecodingResult {numbers: vec![0, 2, 28], u:5, lu: 4})
-        );
-    }    
+    
 }
