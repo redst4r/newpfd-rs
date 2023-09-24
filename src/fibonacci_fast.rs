@@ -68,17 +68,17 @@ fn create_lookup(segment_size: usize) -> HashMap<(State, BitVec<usize, Lsb0>), (
             // pull out all the bits in questions
 
             let r = decode_with_remainder(&bitstream, lastbit);
-            let newstate;
+            
             // we need to know the bits behind the last terminator
             let trailing_bits= &bitstream[bitstream.len()-r.lu..];
-            if trailing_bits.len() == 0 {
+            let newstate = if trailing_bits.is_empty() {
                 // we ended with a temrinator:  xxxxxx11|yyy
                 // resets the state to 0
-                newstate = State(0);
+                State(0)
             } else {
                 let final_bit = trailing_bits[trailing_bits.len()-1];
-                newstate = if final_bit { State(1)} else {State(0)}
-            }
+                if final_bit { State(1)} else {State(0)}
+            };
 
             let laststate = if lastbit {State(1)} else {State(0)};
             table.insert((laststate, bitstream), (newstate, r));
@@ -201,20 +201,57 @@ mod test_decode_with_remainder{
         assert_eq!(r.lu, 0);    
     }
 }
+
+/// State of the decoding across multiple segments. Keeps track of completely 
+/// decoded and partially decoded numbers (which could be completed with the next segment)
+/// 
+struct DecodingState {
+    decoded_numbers: Vec<u64>,  // completly decoded numbers across all segments so far
+    n: u64,   // the partially decoded number from the last segment
+    len: usize, // length of the last partially decoded number in bits; needed to bitshift whatever the next decoding result is
+}
+impl DecodingState {
+    pub fn new() -> Self {
+        DecodingState {decoded_numbers: Vec::new(), n: 0, len: 0 }
+    }
+
+    /// update the current decoding state with the results from the last segment of bits;
+    /// i.e. new decoded numbers, new accumulator (n) and new trailing bits (len) 
+    fn update(&mut self, decoding_result: &DecodingResult) {
+        for &num in decoding_result.numbers.iter() {
+            if self.len > 0 {  // some leftover from the previous segment
+                self.n += fibonacci_left_shift(num, self.len);
+            } else {
+                self.n = num;
+            }
+
+            self.decoded_numbers.push(self.n);
+            self.n = 0;
+            self.len = 0;
+        }
+
+        // the beginning and inner port of F(n)
+        if decoding_result.lu > 0 {
+            self.n += fibonacci_left_shift(decoding_result.u, self.len);
+            self.len += decoding_result.lu;
+        }
+    }
+}
+
 /// 
 pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64> {
 
     let the_table = create_lookup(segment_size);
+    let mut decoding_state = DecodingState::new();
 
-    let mut decoded_numbers = Vec::new();
+    // let mut decoded_numbers = Vec::new();
     let mut n_chunks = stream.len() / segment_size;
     if stream.len() % segment_size > 0 {
         n_chunks+= 1;
     } 
 
     let mut state = State(0);
-    let mut len = 0;
-    let mut n = 0_u64;
+
     // for segment in &stream.iter().chunks(8) {
     for i in 0..n_chunks{
         // get a segment
@@ -235,27 +272,11 @@ pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64>
         let (newstate, result) = the_table.get(&(state, segment)).unwrap();
 
         state = *newstate;
-        let mutresult = result;
-        // 
-        for &num in mutresult.numbers.iter() {
-            if len > 0 {  // some leftover from the previous segment
-                n += fibonacci_left_shift(num, len);
-            } else {
-                n = num;
-            }
-
-            decoded_numbers.push(n);
-            n = 0;
-            len = 0;
-        }
-
-        // the beginning and inner port of F(n)
-        if result.lu > 0 {
-            n += fibonacci_left_shift(result.u, len);
-            len += result.lu;
-        }
+        // update the current decoding state:
+        // add completely decoded numbers, deal with partially decoded numbers
+        decoding_state.update(result);
     }
-    decoded_numbers
+    decoding_state.decoded_numbers
 }
 
 /// operating on 8bit seqgments
@@ -264,48 +285,27 @@ pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64>
 pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>, table: &impl U8Lookup) -> Vec<u64> {
 
     let segment_size = 8;
-
-    let mut decoded_numbers = Vec::new();
+    let mut decoding_state = DecodingState::new();
     // let mut n_chunks = stream.len() / segment_size;
     // if stream.len() % segment_size > 0 {
     //     n_chunks+= 1;
     // } 
 
     let mut state = State(0);
-    let mut len = 0;
-    let mut n = 0_u64;
-
     // for i in 0..n_chunks{
     for segment in stream.chunks(segment_size) {
-
         // // get a segment
         // let start = i*segment_size;
         // let end = cmp::min((i+1)*segment_size, stream.len());
         // let segment = &stream[start..end];
         let segment_u8 = segment.load_be::<u8>();
-        
         let (newstate, result) = table.lookup(state, segment_u8);
         state = newstate;
-
-        for &num in result.numbers.iter() {
-            if len > 0 {  // some leftover from the previous segment
-                n += fibonacci_left_shift(num, len);
-            } else {
-                n = num;
-            }
-
-            decoded_numbers.push(n);
-            n = 0;
-            len = 0;
-        }
-
-        // the beginning and inner port of F(n)
-        if result.lu > 0 {
-            n += fibonacci_left_shift(result.u, len);
-            len += result.lu;
-        }
+        // update the current decoding state:
+        // add completely decoded numbers, deal with partially decoded numbers
+        decoding_state.update(result);
     }
-    decoded_numbers
+    decoding_state.decoded_numbers
 }
 
 /// operating on 16bit seqgments
@@ -315,50 +315,28 @@ pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>, table: &impl U16Lookup) -> V
 
     // println!("Total stream {}", bitstream_to_string(&stream));
     let segment_size = 16;
+    let mut decoding_state = DecodingState::new();
 
-    let mut decoded_numbers = Vec::new();
     // let mut n_chunks = stream.len() / segment_size;
     // if stream.len() % segment_size > 0 {
     //     n_chunks+= 1;
     // } 
 
     let mut state = State(0);
-    let mut len = 0;
-    let mut n = 0_u64;
-
     // for i in 0..n_chunks{
     for segment in stream.chunks(segment_size) {
-
         // get a segment
         // let start = i*segment_size;
         // let end = cmp::min((i+1)*segment_size, stream.len());
         // let segment = &stream[start..end];
-
         let segment_u16 = segment.load_be::<u16>();
         let (newstate, result) = table.lookup(state, segment_u16);
-
         state = newstate;
-
-        for &num in result.numbers.iter() {
-            if len > 0 {  // some leftover from the previous segment
-                n += fibonacci_left_shift(num, len);
-            }
-            else {
-                n = num;
-            }
-
-            decoded_numbers.push(n);
-            n= 0;
-            len =0;
-        }
-
-        // the beginning and inner port of F(n)
-        if result.lu > 0 {
-            n += fibonacci_left_shift(result.u, len);
-            len += result.lu;
-        }
+        // update the current decoding state:
+        // add completely decoded numbers, deal with partially decoded numbers        
+        decoding_state.update(result);
     }
-    decoded_numbers
+    decoding_state.decoded_numbers
 }
 
 #[cfg(test)]
@@ -573,17 +551,17 @@ impl LookupU8Vec {
                 // pull out all the bits in questions
 
                 let r = decode_with_remainder(&bitstream, lastbit);
-                let newstate;
+                
                 // we need to know the bits behind the last terminator
                 let trailing_bits= &bitstream[bitstream.len()-r.lu..];
-                if trailing_bits.len() == 0 {
+                let newstate = if trailing_bits.is_empty() {
                     // we ended with a temrinator:  xxxxxx11|yyy
                     // resets the state to 0
-                    newstate = State(0);
+                    State(0)
                 } else {
                     let final_bit = trailing_bits[trailing_bits.len()-1];
-                    newstate = if final_bit { State(1)} else {State(0)}
-                }
+                    if final_bit { State(1)} else {State(0)}
+                };
 
                 // insert result based on new state
                 if lastbit {
@@ -645,17 +623,17 @@ impl LookupU8Hash {
                 // pull out all the bits in questions
 
                                 let r = decode_with_remainder(&bitstream, lastbit);
-                let newstate;
+                
                 // we need to know the bits behind the last terminator
                 let trailing_bits= &bitstream[bitstream.len()-r.lu..];
-                if trailing_bits.len() == 0 {
+                let newstate = if trailing_bits.is_empty() {
                     // we ended with a temrinator:  xxxxxx11|yyy
                     // resets the state to 0
-                    newstate = State(0);
+                    State(0)
                 } else {
                     let final_bit = trailing_bits[trailing_bits.len()-1];
-                    newstate = if final_bit { State(1)} else {State(0)}
-                }
+                    if final_bit { State(1)} else {State(0)}
+                };
 
                 // insert result based on new state
                 if lastbit {
@@ -723,17 +701,17 @@ impl LookupU16Vec {
                 // pull out all the bits in questions
 
                 let r = decode_with_remainder(&bitstream, lastbit);
-                let newstate;
+                ;
                 // we need to know the bits behind the last terminator
                 let trailing_bits= &bitstream[bitstream.len()-r.lu..];
-                if trailing_bits.len() == 0 {
+                let newstate = if trailing_bits.is_empty() {
                     // we ended with a temrinator:  xxxxxx11|yyy
                     // resets the state to 0
-                    newstate = State(0);
+                    State(0)
                 } else {
                     let final_bit = trailing_bits[trailing_bits.len()-1];
-                    newstate = if final_bit { State(1)} else {State(0)}
-                }
+                    if final_bit { State(1)} else {State(0)}
+                };
 
                 // insert result based on new state                 
                 if lastbit {
@@ -797,17 +775,17 @@ impl LookupU16Hash {
                 // pull out all the bits in questions
 
                 let r = decode_with_remainder(&bitstream, lastbit);
-                let newstate;
+
                 // we need to know the bits behind the last terminator
                 let trailing_bits= &bitstream[bitstream.len()-r.lu..];
-                if trailing_bits.len() == 0 {
+                let newstate = if trailing_bits.is_empty() {
                     // we ended with a temrinator:  xxxxxx11|yyy
                     // resets the state to 0
-                    newstate = State(0);
+                    State(0)
                 } else {
                     let final_bit = trailing_bits[trailing_bits.len()-1];
-                    newstate = if final_bit { State(1)} else {State(0)}
-                }
+                    if final_bit { State(1)} else {State(0)}
+                };
 
                 // insert result based on new state
                 if lastbit {
