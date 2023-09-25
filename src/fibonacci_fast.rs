@@ -251,7 +251,7 @@ mod test_iter {
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
-        let dec = FibonacciDecoder::new(&b);
+        let dec = FibonacciDecoder::new(&b, false);
         let x1: Vec<_> = dec.collect();
 
         let table= LookupU16Vec::new();
@@ -677,7 +677,6 @@ mod testing_fast_decode {
     fn test_correctness_fast_decode() {
         use crate::fibonacci::FibonacciDecoder;
         use crate::fib_utils::random_fibonacci_stream;
-        // use crate::newpfd_bitvec::bitstream_to_string;
         let b = random_fibonacci_stream(100000, 1, 1000);
         // let b = dummy_encode(vec![64, 11, 88]);
         // make a copy for fast decoder
@@ -685,7 +684,7 @@ mod testing_fast_decode {
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
-        let dec = FibonacciDecoder::new(&b);
+        let dec = FibonacciDecoder::new(&b, false);
         let x1: Vec<_> = dec.collect();
         let x2 = fast_decode(b_fast.clone(), 8);
 
@@ -704,7 +703,7 @@ mod testing_fast_decode {
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
-        let dec = FibonacciDecoder::new(&b);
+        let dec = FibonacciDecoder::new(&b, false);
         let x1: Vec<_> = dec.collect();
 
         let table = LookupU8Vec::new();
@@ -726,7 +725,7 @@ mod testing_fast_decode {
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
-        let dec = FibonacciDecoder::new(&b);
+        let dec = FibonacciDecoder::new(&b, false);
         let x1: Vec<_> = dec.collect();
         let table = LookupU16Vec::new();
         let x2 = fast_decode_u16(b_fast.clone(), &table);

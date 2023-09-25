@@ -97,7 +97,7 @@ fn fibonacci_encode(c: &mut Criterion){
 fn fibonacci_decode(c: &mut Criterion){
 
     fn _dummy_my_decode(data: MyBitVector) -> Vec<u64>{
-        let d = FibonacciDecoder::new(data.as_bitslice());
+        let d = FibonacciDecoder::new(data.as_bitslice(), false);
         let dec: Vec<_> = d.collect();
         dec
     }
@@ -214,7 +214,7 @@ fn fast_decode_vs_regular(c: &mut Criterion){
  
 
     fn dummy(bv: BitVec<u8, Msb0>) -> Vec<u64> {
-        let dec = FibonacciDecoder::new(&bv);
+        let dec = FibonacciDecoder::new(&bv, false);
         let x: Vec<_> = dec.collect();
         // println!("{}", x.len());
         x

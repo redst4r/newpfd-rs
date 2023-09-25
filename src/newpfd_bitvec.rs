@@ -388,23 +388,16 @@ fn min_and_clone(x: &[u64]) -> (u64, Vec<u64>) {
 fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
 
     let mut buf_position = 0;
-    let mut fibdec = fibonacci::FibonacciDecoder::new(buf);
+    let mut fibdec = fibonacci::FibonacciDecoder::new(buf,true);
     // pulling the elements out of the header (b_bits, min_el, n_exceptions)
-    let _b_bits = fibdec.next().unwrap();
-    let mut b_bits = _b_bits as usize;
-    let mut min_el = fibdec.next().unwrap();
-    let mut n_exceptions = fibdec.next().unwrap();
-
-    // as fibonaccis encoding doesnt allow 0 everything is shifted by +1
-    // undo that here
-    b_bits -= 1;
-    min_el -= 1;
-    n_exceptions -= 1;
+    let b_bits = fibdec.next().unwrap() as usize;
+    let min_el = fibdec.next().unwrap();
+    let n_exceptions = fibdec.next().unwrap();
 
     // decoding the Gaps
     let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
     for _ in 0..n_exceptions { 
-        let ix =  fibdec.next().unwrap() - 1; // shift in encode
+        let ix =  fibdec.next().unwrap();
         index_gaps.push(ix);
     }
 
@@ -412,7 +405,7 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
     let mut exceptions = Vec::with_capacity(n_exceptions as usize);
     for _ in 0..n_exceptions { 
         let ex = fibdec.next().unwrap();
-        exceptions.push(ex);
+        exceptions.push(ex+1);  //undoing the shift applyied by the decoder; apparently the exceptions are NOT shifhted
     }
 
     // turn index gaps into the actual index (of expections)

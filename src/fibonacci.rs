@@ -7,7 +7,7 @@
 //! use newpfd::fibonacci::{fib_enc_multiple_fast,FibonacciDecoder, bitslice_to_fibonacci};
 //! let encode = fib_enc_multiple_fast(&vec![34, 12]) ;
 //! 
-//! let f = FibonacciDecoder::new(&encode);
+//! let f = FibonacciDecoder::new(&encode, false);
 //! assert_eq!(f.collect::<Vec<_>>(), vec![34,12])
 //! ```
 
@@ -149,7 +149,7 @@ pub fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
 /// use newpfd::fibonacci::FibonacciDecoder;
 /// use bitvec::prelude::{BitVec, Msb0};
 /// let buffer:BitVec<u8, Msb0> = BitVec::from_iter(vec![true, false, true, true, false, true, true]);
-/// let d = FibonacciDecoder::new(buffer.as_bitslice());
+/// let d = FibonacciDecoder::new(buffer.as_bitslice(), false);
 /// for decoded in d {
 ///     println!("{}", decoded);
 /// }
@@ -158,13 +158,14 @@ pub fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
 pub struct FibonacciDecoder <'a> {
     buffer: &'a MyBitSlice,
     current_pos: usize, // where we are at in the buffer (the last split), i.e the unprocessed part is buffer[current_pos..]
+    shifted_by_one: bool, // if true, this means that a decoded value of `1` actually is a zero (and was shifted in the encoding)
 }
 
 impl <'a> FibonacciDecoder<'a> {
     /// Creates a new fibonacci decoder for the given buffer. 
     /// This leaves the buffer  unchanged, just moves a pointer (self.current_pos) in the buffer around
-    pub fn new(buffer: &'a MyBitSlice) -> Self {
-        FibonacciDecoder { buffer, current_pos:0}
+    pub fn new(buffer: &'a MyBitSlice, shifted_by_one: bool) -> Self {
+        FibonacciDecoder { buffer, current_pos:0, shifted_by_one}
     }
 
     /// Returns the buffer behind the last bit processed.
@@ -201,8 +202,12 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
                 (true, true) => {
                     // found 11
                     let hit_len = idx+1;
-                    self.current_pos += hit_len; 
-                    return Some(accumulator);
+                    self.current_pos += hit_len;
+                    if self.shifted_by_one {
+                        return Some(accumulator-1);
+                    } else {
+                        return Some(accumulator);
+                    }
                 }
                 (false, false) | (true, false) => {}  // current bit is zero, nothing to add
             }
@@ -444,7 +449,7 @@ mod test {
         let b = bits![u8, Msb0; 0,0,1,1];
 
         // println!("full : {:?}", b);
-        let mut my = FibonacciDecoder {buffer: b, current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0, shifted_by_one: false};
 
         assert_eq!(
             my.next(), 
@@ -461,7 +466,7 @@ mod test {
         let b = bits![u8, Msb0; 0,0,1,1,1,1];
 
         println!("full : {:?}", b);
-        let mut my = FibonacciDecoder {buffer: b, current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0, shifted_by_one: false};
 
         assert_eq!(
             my.next(), 
@@ -481,12 +486,39 @@ mod test {
     fn test_myfib_decoder_nothing() {
         let b = bits![u8, Msb0; 0,0,1,0,1,0,1];
 
-        println!("full : {:?}", b);
-        let mut my = FibonacciDecoder {buffer: b, current_pos:0};
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0, shifted_by_one: false};
+        assert_eq!(
+            my.next(), 
+            None
+        );
 
+        // shift
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0, shifted_by_one: true};
         assert_eq!(
             my.next(), 
             None
         );
     }
+    #[test]
+    fn test_myfib_decoder_Shifted() {
+        // let v: Vec<bool> = vec![0,0,1,1].iter().map(|x|*x==1).collect();
+        // let b: MyBitVector  = BitVec::from_iter(v.into_iter());
+        let b = bits![u8, Msb0; 0,0,1,1,1,1];
+
+        // println!("full : {:?}", b);
+        let mut my = FibonacciDecoder {buffer: b, current_pos:0, shifted_by_one: true};
+
+        assert_eq!(
+            my.next(), 
+            Some(2)
+        );
+        assert_eq!(
+            my.next(), 
+            Some(0)
+        );
+        assert_eq!(
+            my.next(), 
+            None
+        );
+    }    
 }
