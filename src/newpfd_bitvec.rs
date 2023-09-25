@@ -3,7 +3,8 @@
 
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
-use crate::fibonacci::{self, fib_enc_multiple_fast, MyBitVector, MyBitSlice};
+use crate::{fibonacci::{self, fib_enc_multiple_fast}, fibonacci_fast::{LookupU16Vec, FastFibonacciDecoder}};
+use crate::{MyBitSlice, MyBitVector};
 
 /// round an integer to the next bigger multiple
 /// ```rust
@@ -467,7 +468,7 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
 mod test {
     use bitvec::prelude as bv;
     use rand::{distributions::Uniform, prelude::Distribution};
-    use crate::fibonacci::MyBitVector;
+    use crate::MyBitVector;
 
     use super::{decode, encode};
     #[test]

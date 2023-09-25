@@ -11,8 +11,12 @@
 //! assert_eq!(f.collect::<Vec<_>>(), vec![34,12])
 //! ```
 
-use bitvec::prelude::*;
+// use bitvec::prelude::*;
 use itertools::izip;
+use std::fmt::Debug;
+use num::CheckedSub;
+use crate::{MyBitSlice, MyBitVector};
+
 
 /// Iterative fibonacci.
 ///
@@ -39,13 +43,6 @@ fn iterative_fibonacci() -> Fibonacci {
     Fibonacci { curr: 1, next: 1 }
 }
 
-// not sure what the significance of those settings is
-// in busz, converting byte buffers to BitSlices seems to require u8;Msb01
-/// The type of bitvector used in the crate.
-/// Importantly, some code *relies* on `Msb0`
-pub (crate) type MyBitSlice = BitSlice<u8, Msb0>;
-/// reftype thqt goes with [MyBitSlice]
-pub (crate) type MyBitVector = BitVec<u8, Msb0>;
 
 // let v: Vec<_> = iterative_fibonacci().take(65 - 1).collect();
 // println!("{:?}", v);
@@ -222,7 +219,7 @@ impl <'a> Iterator for FibonacciDecoder<'a> {
 pub fn fib_enc_multiple_fast(data: &[u64]) -> MyBitVector{
 
     // the capacity is a minimum, assuming each element of data is 1, i.e. `11` in fib encoding
-    let mut overall = BitVec::with_capacity(2*data.len()); 
+    let mut overall = MyBitVector::with_capacity(2*data.len()); 
 
     // this just appends to the `overall` bitvec
     for &x in data {
@@ -231,9 +228,6 @@ pub fn fib_enc_multiple_fast(data: &[u64]) -> MyBitVector{
     overall
 }
 
-
-use std::fmt::Debug;
-use num::CheckedSub;
 #[derive(Debug, PartialEq)]
 
 /// Hijacked from https://github.com/antifuchs/fibonacci_codec
@@ -296,7 +290,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::fibonacci::{bitslice_to_fibonacci, FibonacciDecoder, MyBitVector, fib_enc_multiple_fast};
+    use crate::{fibonacci::{bitslice_to_fibonacci, FibonacciDecoder, MyBitVector, fib_enc_multiple_fast}};
     use bitvec::prelude::*;
 
     mod test_table {
@@ -500,7 +494,7 @@ mod test {
         );
     }
     #[test]
-    fn test_myfib_decoder_Shifted() {
+    fn test_myfib_decoder_shifted() {
         // let v: Vec<bool> = vec![0,0,1,1].iter().map(|x|*x==1).collect();
         // let b: MyBitVector  = BitVec::from_iter(v.into_iter());
         let b = bits![u8, Msb0; 0,0,1,1,1,1];

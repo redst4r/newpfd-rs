@@ -127,7 +127,6 @@ impl <'a>Iterator for FastFibonacciDecoder<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
 
-        // if self.current_buffer.is_empty() {  // should be: while buffer is empty, keep loading new segments!
         while self.current_buffer.is_empty() {  // should be: while buffer is empty, keep loading new segments!
             self.load_segment();
         }
@@ -138,14 +137,11 @@ impl <'a>Iterator for FastFibonacciDecoder<'a> {
         // let _dummy = self.current_backtrack.remove(0); // TODO: expensive, Deque instead?
         // self.last_emission_last_position = _dummy;
 
-
         let el = self.current_buffer.pop_front().unwrap(); // unwrap should be save, there HAS to be an element
         let _dummy = self.current_backtrack.pop_front().unwrap();// unwrap should be save, there HAS to be an element
         self.last_emission_last_position = _dummy;
 
-
         // println!("State after emission: Position {}, LastPos {:?}, Buffer {:?} starts: {:?}", self.position, self.last_emission_last_position, self.current_buffer, self.current_backtrack);
-
         el
     }
 }

@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use bitvec::vec::BitVec;
 use rand::{distributions::Uniform, prelude::Distribution};
-use crate::fibonacci::{FIB64, MyBitVector, bits_from_table, fib_enc_multiple_fast};
-
+use crate::fibonacci::{FIB64, bits_from_table, fib_enc_multiple_fast};
+use crate::MyBitVector;
 // Check with Table 6.6
 // this function is used to generate/precompute the fiboncci shifts
 #[allow(dead_code)]

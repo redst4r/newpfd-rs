@@ -1,7 +1,7 @@
 //! Some older, slower code for fibonacci encoding
 //! mostly educational
-use crate::fibonacci::{FIB64, MyBitVector};
-
+use crate::fibonacci::FIB64;
+use crate::MyBitVector;
 /// Fibonacci encoding of a single integer
 /// 
 /// # Example:

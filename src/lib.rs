@@ -62,3 +62,26 @@ pub mod fibonacci;
 pub mod fibonacci_fast;
 pub mod fibonacci_old;
 pub mod fib_utils;
+
+// not sure what the significance of those settings is
+// in busz, converting byte buffers to BitSlices seems to require u8;Msb01
+
+// Heres the deal:
+// It looks like Msb0 bs Lsb0 ONLY comes into play when using the 
+// .load_be() or _load_le() functions.
+// For example
+// bits![u8, Msb0; 0,0,0,1].load_be::<u8>()   -> 1
+// Because  8 4 2 1  binary coding
+//          0 0 0 1
+// Onn the other hand:
+// bits![u8, Lsb0; 0,0,0,1].load_be::<u8>()   -> 8
+// because  1 2 4 8
+//          0 0 0 1
+//
+use bitvec::prelude as bv;
+
+/// The type of bitvector used in the crate.
+/// Importantly, some code *relies* on `Msb0`
+pub (crate) type MyBitSlice = bv::BitSlice<u8, bv::Msb0>;
+/// reftype thqt goes with [MyBitSlice]
+pub (crate) type MyBitVector = bv::BitVec<u8, bv::Msb0>;
