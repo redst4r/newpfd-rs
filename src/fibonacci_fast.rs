@@ -16,7 +16,7 @@
 //! One has to exploit the fact that a segment can be represented by an integer,
 //! and store the results in a vec, indexed by the segment
 
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::{HashMap, VecDeque}, hash::Hash};
 use bitvec::{vec::BitVec, field::BitField, view::BitView};
 use itertools::Itertools;
 use num::traits::Pow;
@@ -30,8 +30,8 @@ pub struct FastFibonacciDecoder<'a>  {
     position: usize,
     lookup_table: &'a LookupU16Vec,
     segment_size: usize,
-    current_buffer: Vec<Option<u64>>,     // decoded numbers not yet emitted
-    current_backtrack: Vec<Option<usize>>,  // for each decoded number in current_buffer, remember how many bits its encoding was
+    current_buffer: VecDeque<Option<u64>>,     // decoded numbers not yet emitted
+    current_backtrack: VecDeque<Option<usize>>,  // for each decoded number in current_buffer, remember how many bits its encoding was
     state: State,
     decoding_state: DecodingState,
     last_emission_last_position: Option<usize>, //position in bitstream after the last emission; None if we exhausted the stream completely
@@ -44,20 +44,13 @@ impl <'a>  FastFibonacciDecoder<'a>  {
             bistream,
             position: 0,
             lookup_table: lookup_table,
-            current_buffer: Vec::new(),
-            current_backtrack: Vec::new(),
+            current_buffer: VecDeque::new(),
+            current_backtrack: VecDeque::new(),
             segment_size: 16,
             state: State(0),
             decoding_state: DecodingState::new(),
             last_emission_last_position: Some(0),
         }
-    }
-    /// gets the next segment out of the stream
-    /// will advance the stream
-    fn get_next_segment(&mut self) ->  &BitSlice<usize, Lsb0> {
-        let segment = &self.bistream[self.position..self.position+self.segment_size];
-        self.position += self.segment_size; 
-        segment
     }
 
     /// return the remaining bitstream after the last yielded number
@@ -68,6 +61,60 @@ impl <'a>  FastFibonacciDecoder<'a>  {
             None => None
         }
     }
+
+    /// decodes the next segment, adding to current_buffer and current_backtrack
+    /// if theres nothgin to any more load (emtpy buffer, or partial buffer with some elements)
+    /// it adds a None to to current_buffer and current_backtrack, indicating the end of the iterator
+    fn load_segment(&mut self) {
+        // println!("Empty buffer");
+        // try to pull in the next segment
+        // let segment = self.get_next_segment();
+        let start = self.position;
+        let end = cmp::min(self.position+self.segment_size, self.bistream.len());
+        let segment = &self.bistream[start..end];
+        // println!("Loading new segment: {}", bitstream_to_string(segment));
+        self.position += self.segment_size; 
+
+        if segment.is_empty() {
+            // add the terminator into the iterator
+            self.current_buffer.push_back(None);
+            self.current_backtrack.push_back(None);
+            return;
+        }
+
+        // decode this segment
+        let segment_u16 = segment.load_be::<u16>();
+    
+        let (newstate, result) = self.lookup_table.lookup(self.state, segment_u16);
+        self.state = newstate;   
+        self.decoding_state.update(result);
+
+        // println!("Decoding state: {:?}", self.decoding_state);
+        // move all decoded numbers into the emission buffer
+
+        // todo: feels like this copy/move is unneeded, 
+        // we could just pop of self.decoding_state.decoded_numbers directly when emitting for the iterator
+        for el in self.decoding_state.decoded_numbers.drain(0..self.decoding_state.decoded_numbers.len()) {
+            self.current_buffer.push_back(Some(el))
+        }
+        // move all decoded numbers starts into the emission buffer
+        // no need to delete in result, gets dropped
+        for &el in result.number_end_in_segment.iter() {
+            self.current_backtrack.push_back(Some(el+start)); // turn the relative (to segment start) into an absolute postion
+        }            
+        assert!(self.decoding_state.decoded_numbers.is_empty());
+
+        // println!("current buffer: {:?}", self.current_buffer);
+
+        if segment.len() != self.segment_size {
+            // println!("partial segment");
+            // a truncated segment, i.e. the last segment
+            // push the terminator into the iterator to signal we;re done
+            self.current_buffer.push_back(None);
+            self.current_backtrack.push_back(None);
+        }        
+    }
+
 }
 
 /// The iterator is a bit complicated! We cant decode a single number, 
@@ -82,59 +129,21 @@ impl <'a>Iterator for FastFibonacciDecoder<'a> {
 
         // if self.current_buffer.is_empty() {  // should be: while buffer is empty, keep loading new segments!
         while self.current_buffer.is_empty() {  // should be: while buffer is empty, keep loading new segments!
-
-            // println!("Empty buffer");
-            // try to pull in the next segment
-            // let segment = self.get_next_segment();
-            let start = self.position;
-            let end = cmp::min(self.position+self.segment_size, self.bistream.len());
-            let segment = &self.bistream[start..end];
-            // println!("Loading new segment: {}", bitstream_to_string(segment));
-            self.position += self.segment_size; 
-
-            if segment.is_empty() {
-                return None
-            }
-
-            // decode this segment
-            let segment_u16 = segment.load_be::<u16>();
-        
-            let (newstate, result) = self.lookup_table.lookup(self.state, segment_u16);
-            self.state = newstate;   
-            self.decoding_state.update(result);
-
-            // println!("Decoding state: {:?}", self.decoding_state);
-            // move all decoded numbers into the emission buffer
-            for el in self.decoding_state.decoded_numbers.drain(0..self.decoding_state.decoded_numbers.len()) {
-                self.current_buffer.push(Some(el))
-            }
-            // move all decoded numbers starts into the emission buffer
-            // no need to delete in result, gets dropped
-            for &el in result.number_end_in_segment.iter() {
-                self.current_backtrack.push(Some(el+start)); // turn the relative (to segment start) into an absolute postion
-            }            
-            assert!(self.decoding_state.decoded_numbers.is_empty());
-
-            // println!("current buffer: {:?}", self.current_buffer);
-
-            if segment.len() == self.segment_size {
-                // println!("Full segment");
-                // a full segment
-                // do nothing
-            } else {
-                // println!("partial segment");
-                // a truncated segment, i.e. the last segment
-                // push the terminator into the iterator to signal we;re done
-                self.current_buffer.push(None);
-                self.current_backtrack.push(None);
-            }
+            self.load_segment();
         }
         // } else {
         //     println!("non-empty buffer: just yielding what we have already: {:?} starts: {:?}", self.current_buffer, self.current_backtrack);
         // }
-        let el = self.current_buffer.remove(0); // TODO: expensive, Deque instead?
-        let _dummy = self.current_backtrack.remove(0); // TODO: expensive, Deque instead?
+        // let el = self.current_buffer.remove(0); // TODO: expensive, Deque instead?
+        // let _dummy = self.current_backtrack.remove(0); // TODO: expensive, Deque instead?
+        // self.last_emission_last_position = _dummy;
+
+
+        let el = self.current_buffer.pop_front().unwrap(); // unwrap should be save, there HAS to be an element
+        let _dummy = self.current_backtrack.pop_front().unwrap();// unwrap should be save, there HAS to be an element
         self.last_emission_last_position = _dummy;
+
+
         // println!("State after emission: Position {}, LastPos {:?}, Buffer {:?} starts: {:?}", self.position, self.last_emission_last_position, self.current_buffer, self.current_backtrack);
 
         el
@@ -144,7 +153,7 @@ impl <'a>Iterator for FastFibonacciDecoder<'a> {
 #[cfg(test)]
 mod test_iter {
     use super::*;
-    use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_iter() {
@@ -364,7 +373,7 @@ fn decode_with_remainder(bitstream: &BitSlice<usize, Lsb0>, lastbit_external: bo
 #[cfg(test)]
 mod test_decode_with_remainder{
     use super::*;
-    use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::assert_eq;
     #[test]
     fn test_decode_with_remainder_edge_case_delimiters() {
 
@@ -711,7 +720,7 @@ mod testing_fast_decode {
     fn test_correctness_fast_decode_u16() {
         use crate::fibonacci::FibonacciDecoder;
         use crate::fib_utils::random_fibonacci_stream;
-        let b = random_fibonacci_stream(100000, 1, 1000);
+        let b = random_fibonacci_stream(1000000, 1, 1000);
         // make a copy for fast decoder
         let mut b_fast: BitVec<usize, Lsb0> = BitVec::new();
         for bit in b.iter().by_vals() {
@@ -748,7 +757,13 @@ mod testing_fast_decode {
         // let x2 = fast_decode(b_fast.clone(), 8);
         let table = LookupU16Vec::new();
         let x2 = fast_decode_u16(b_fast.clone(), &table);
-        println!("{}", x2.iter().sum::<u64>())    
+        println!("{}", x2.iter().sum::<u64>())    ;
+
+
+        // let x2 = fast_decode(b_fast.clone(), 8);
+        let table = LookupU16Vec::new();
+        let f = FastFibonacciDecoder::new(&b_fast, &table);
+        println!("{}", f.sum::<u64>())
 
     }
 }
@@ -951,7 +966,6 @@ impl LookupU16Vec {
                 // pull out all the bits in questions
 
                 let r = decode_with_remainder(&bitstream, lastbit);
-                ;
                 // we need to know the bits behind the last terminator
                 let trailing_bits= &bitstream[bitstream.len()-r.lu..];
                 let newstate = if trailing_bits.is_empty() {
