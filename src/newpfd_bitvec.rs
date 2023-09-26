@@ -23,13 +23,6 @@ struct NewPFDParams {
     min_element: u64
 }
 
-/// elements in the primary buffer are stored using b_bits
-/// decode these as u64s
-fn decode_primary_buf_element(x: &MyBitSlice) -> u64 {
-    let a:u64 = x.load_be();
-    a
-}
-
 /// Decode a NewPFD-encoded buffer, containing `n_elements`. 
 /// Due to limitations of the format, we can't know (internally) how many elements were stored, 
 /// hence `n_elements` needs to be specified
@@ -135,7 +128,7 @@ pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (MyBit
 /// but just takes each elements lowerest `b_bits`, truncating the higher bits
 #[derive(Debug)]
 struct PrimaryBuffer {
-    buffer: MyBitVector,
+    buffer: bv::BitVec<u8, bv::Msb0>, // NOTE: this is HARDCODED as Msb; this is how bustools stores the primaryBuffer on disk
     b_bits: usize,     // bits per int
     blocksize: usize,  // max number of elements that can be stored
     position: usize,   // current bitposition in the buffer
@@ -149,7 +142,6 @@ impl PrimaryBuffer {
 
         // this is the maximum element we can store using b_bits
         let max_elem_bit_mask = (1_u64 << b_bits) - 1;
-
         PrimaryBuffer {
             buffer,
             b_bits,
@@ -195,11 +187,12 @@ impl PrimaryBuffer {
             // split off an element into x
             let bits = &self.buffer[pos..pos+self.b_bits];
             pos+=self.b_bits;
-            decoded_primary.push(decode_primary_buf_element(bits));
+            decoded_primary.push(Self::decode_primary_buf_element(bits));
         }
         decoded_primary
     }
 
+    /*
     // problem: ned to move buffer, but usually its only a view
     pub fn from_bitvec(b: MyBitVector, b_bits:usize) -> Self {
 
@@ -209,7 +202,17 @@ impl PrimaryBuffer {
         let max_elem_bit_mask = (1_u64 << b_bits) - 1;
 
         PrimaryBuffer { buffer: b, b_bits, blocksize, position: nbits, max_elem_bit_mask }
-    }
+    } */
+
+    /// elements in the primary buffer are stored using b_bits
+    /// decode these as u64s
+    /// 
+    /// Note that the BitOrder is HARDCODED to Msb0. This is required to be consistent with bustools.
+    /// 
+    fn decode_primary_buf_element(x: &bv::BitSlice<u8, bv::Msb0>) -> u64 {
+        let a:u64 = x.load_be(); // note that the result depends on the BitOrder in x
+        a
+    }    
 }
 
 /// Data Stored in a single block of the NewPFD format
@@ -232,7 +235,7 @@ struct NewPFDBlock {
     blocksize: usize, // the max number of elements to be stored; usually 512, needs to be a multiple of 32
     // primary_buffer: Vec<bv::BitVec<u8, bv::Msb0>>,
     exceptions: Vec<u64>,
-    index_gaps : Vec<u64>
+    index_gaps: Vec<u64>
 }
 
 impl NewPFDBlock {
@@ -241,14 +244,12 @@ impl NewPFDBlock {
 
         assert_eq!(blocksize % 32, 0, "Blocksize must be mutiple of 32");
         // let pb = Vec::with_capacity(blocksize);
-        let exceptions: Vec<u64> = Vec::new();
-        let index_gaps : Vec<u64> = Vec::new();
         NewPFDBlock { 
             b_bits, 
             blocksize,
             // primary_buffer: pb, 
-            exceptions, 
-            index_gaps 
+            exceptions: Vec::new(), 
+            index_gaps: Vec::new(), 
         }
     }
 
@@ -439,15 +440,15 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
     // i.e. for a partial block, we cant really know how many elements are in there
     // (they might all be 0)
 
-    let n_elements = blocksize;
-    let mut decoded_primary: Vec<u64> = Vec::with_capacity(n_elements);
+    let mut decoded_primary: Vec<u64> = Vec::with_capacity(blocksize);
 
     // TODO: move this code into PrimaryBuffer
-    for _ in 0..n_elements {
+    for _ in 0..blocksize {
         // split off an element into x
         let bits = &buf_body[body_pos..body_pos+b_bits];
-        body_pos+=b_bits;
-        decoded_primary.push(decode_primary_buf_element(bits));
+
+        body_pos += b_bits;
+        decoded_primary.push(PrimaryBuffer::decode_primary_buf_element(bits));
     }
 
     // puzzle it together: at the locations of exceptions, increment the decoded values
@@ -466,11 +467,8 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
 
 #[cfg(test)]
 mod test {
-    use bitvec::prelude as bv;
     use rand::{distributions::Uniform, prelude::Distribution};
-    use crate::MyBitVector;
-
-    use super::{decode, encode};
+    use super::*;
     #[test]
     fn test_larger_ecs_22() {
         let input = vec![264597, 760881, 216982, 203942, 218976];
@@ -614,6 +612,8 @@ mod test {
 
     mod test_primary {
         use crate::newpfd_bitvec::PrimaryBuffer;
+        use bitvec::prelude::*;
+
         #[test]
         fn test_primary() {
             let mut p = PrimaryBuffer::new(2, 3);
@@ -621,8 +621,10 @@ mod test {
             p.add_element(0); // 00 in binary
             p.add_element(3); // 11 in binary
             assert_eq!(
-                p.buffer.iter().collect::<Vec<_>>(), 
-                vec![true, true, false, false, true, true] 
+                p.buffer, 
+                crate::bv::bits![u8, Lsb0; 1, 1, 0, 0, 1, 1]                 
+                // p.buffer.iter().collect::<Vec<_>>(), 
+                // vec![true, true, false, false, true, true] 
             );
         }
         #[test]
@@ -630,7 +632,12 @@ mod test {
             let mut p = PrimaryBuffer::new(2, 3);
             p.add_element(5); // 101 in binary
 
-            // should onyl store the lower two bits
+            // // should onyl store the lower two bits
+            // assert_eq!(
+            //     p.buffer, 
+            //     crate::bv::bits![u8, Lsb0; 0, 1, 0, 0, 0, 0] 
+            // );
+
             assert_eq!(
                 p.buffer.iter().collect::<Vec<_>>(), 
                 vec![false, true, false, false, false, false] 

@@ -290,7 +290,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{fibonacci::{bitslice_to_fibonacci, FibonacciDecoder, MyBitVector, fib_enc_multiple_fast}};
+    use crate::fibonacci::{bitslice_to_fibonacci, FibonacciDecoder, MyBitVector, fib_enc_multiple_fast};
     use bitvec::prelude::*;
 
     mod test_table {
