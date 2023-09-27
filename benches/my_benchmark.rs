@@ -201,7 +201,7 @@ fn fast_decode_vs_regular(c: &mut Criterion){
 
 
     fn dummy_fast_iter(data_fast: &BitSlice<usize, Lsb0>, table: &LookupU16Vec) -> Vec<u64> {
-        let f = FastFibonacciDecoder::new(&data_fast.clone(), table);
+        let f = FastFibonacciDecoder::new(data_fast.clone(), table, false);
         let x: Vec<_> = f.collect();
         x
     }
