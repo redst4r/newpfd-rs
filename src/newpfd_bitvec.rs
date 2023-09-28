@@ -392,23 +392,34 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
     let mut buf_position = 0;
     let mut fibdec = fibonacci::FibonacciDecoder::new(buf,true);
     // pulling the elements out of the header (b_bits, min_el, n_exceptions)
-    let b_bits = fibdec.next().unwrap() as usize;
-    let min_el = fibdec.next().unwrap();
-    let n_exceptions = fibdec.next().unwrap();
+    // let b_bits = fibdec.next().unwrap() as usize;
+    // let min_el = fibdec.next().unwrap();
+    // let n_exceptions = fibdec.next().unwrap();
+
+    let (_b_bits, min_el, n_exceptions) = fibdec.by_ref().take(3).next_tuple().unwrap(); //TODO yield a protocolError if we cant get 3 elements
+    let b_bits = _b_bits as usize;
+    
 
     // decoding the Gaps
-    let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
-    for _ in 0..n_exceptions { 
-        let ix =  fibdec.next().unwrap();
-        index_gaps.push(ix);
-    }
+    // let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
+    // for _ in 0..n_exceptions { 
+    //     let ix =  fibdec.next().unwrap();
+    //     index_gaps.push(ix);
+    // }
+    let index_gaps: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).collect();
+    assert_eq!(index_gaps.len(), n_exceptions as usize, "protocol error, not enough exceptions");
+
 
     // Decoding expections
-    let mut exceptions = Vec::with_capacity(n_exceptions as usize);
-    for _ in 0..n_exceptions { 
-        let ex = fibdec.next().unwrap();
-        exceptions.push(ex+1);  //undoing the shift applyied by the decoder; apparently the exceptions are NOT shifhted
-    }
+    // let mut exceptions = Vec::with_capacity(n_exceptions as usize);
+    // for _ in 0..n_exceptions { 
+    //     let ex = fibdec.next().unwrap();
+    //     exceptions.push(ex+1);  //undoing the shift applyied by the decoder; apparently the exceptions are NOT shifhted
+    // }
+
+    let exceptions: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).map(|x|x+1).collect();
+    assert_eq!(exceptions.len(), n_exceptions as usize, "protocol error, not enough exceptions");
+
 
     // turn index gaps into the actual index (of expections)
     let index: Vec<u64> = index_gaps
@@ -430,15 +441,25 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
     // the body of the block, i.e. bitpacked integers
     let buf_body = &buf[buf_position..];
 
-    // let buf_body_full = &buf[buf_position..buf_position+(blocksize*b_bits)];
-
-    let mut body_pos = 0;
     
     // note that a block can be shorter than sepcifiec if we ran out of elements
     // however, as currently implements (by bustools)
     // the primary block always has blocksize*b_bits bitsize!
     // i.e. for a partial block, we cant really know how many elements are in there
     // (they might all be 0)
+    // hence lets get the predefined size of the primary blokc:
+    let mut body_pos = 0;
+
+    // we need to hget the primary_buffer into Msb Order (required!!)
+    // NOTE THAT CONVERSION IS VERY SLOW!!! I.e. MSB->LSB copy takes much longer than a MSB->MSB copy
+    // i.e. dont do the following; but rather have everything work with Msb
+    //
+    // let mut buf_body_full: bv::BitVec<u8, bv::Msb0> = bv::BitVec::with_capacity(blocksize*b_bits);
+    // buf_body_full.extend_from_bitslice(&buf[buf_position..buf_position+(blocksize*b_bits)]);
+
+    // maybe a swap?
+    // buf_body_full.swap_with_bitslice(buf_body);
+
 
     let mut decoded_primary: Vec<u64> = Vec::with_capacity(blocksize);
 
