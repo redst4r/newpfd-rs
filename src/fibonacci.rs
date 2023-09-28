@@ -11,11 +11,18 @@
 //! assert_eq!(f.collect::<Vec<_>>(), vec![34,12])
 //! ```
 
+
 // use bitvec::prelude::*;
 use itertools::izip;
 use std::fmt::Debug;
 use num::CheckedSub;
+
+/// note the the entire content of this module is 
+/// independent of the choice of BitOrder, i.e.
+/// both Lsb0 and Msb0 work the same way!
 use crate::{MyBitSlice, MyBitVector};
+
+
 
 
 /// Iterative fibonacci.

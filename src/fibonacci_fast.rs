@@ -24,9 +24,15 @@ use bitvec::prelude::*;
 use crate::{fibonacci::FIB64, fib_utils::fibonacci_left_shift};
 use std::cmp;
 
+type FFBitorder = Msb0;
+
+// the type of bitstream we expect as input!
+type FFBitslice = BitSlice<u8, FFBitorder>;
+type FFBitvec = BitVec<u8, FFBitorder>;
+
 /// rr
 pub struct FastFibonacciDecoder<'a>  {
-    bistream: &'a BitSlice<usize, Lsb0>,
+    bistream: &'a FFBitslice, // bitstream to decode
     position: usize,
     lookup_table: &'a LookupU16Vec,
     segment_size: usize,
@@ -40,11 +46,11 @@ pub struct FastFibonacciDecoder<'a>  {
 }
 impl <'a>  FastFibonacciDecoder<'a>  {
     ///
-    pub fn new(bistream: &'a BitSlice<usize, Lsb0>, lookup_table: &'a LookupU16Vec, shifted_by_one: bool) -> Self {
+    pub fn new(bistream: &'a FFBitslice, lookup_table: &'a LookupU16Vec, shifted_by_one: bool) -> Self {
         FastFibonacciDecoder {
             bistream,
             position: 0,
-            lookup_table: lookup_table,
+            lookup_table,
             current_buffer: VecDeque::new(),
             current_backtrack: VecDeque::new(),
             segment_size: u16::BITS as usize,
@@ -57,7 +63,7 @@ impl <'a>  FastFibonacciDecoder<'a>  {
 
     /// return the remaining bitstream after the last yielded number
     /// if the bitstream isfull exhausted (i.e. no remainder), return None
-    pub fn get_remaining_buffer(&self) -> Option<&'a BitSlice<usize, Lsb0>>{
+    pub fn get_remaining_buffer(&self) -> Option<&'a FFBitslice>{
         match self.last_emission_last_position {
             Some(pos) =>  Some(&self.bistream[pos+1..]),
             None => None
@@ -93,7 +99,23 @@ impl <'a>  FastFibonacciDecoder<'a>  {
         }
 
         // decode this segment
-        let segment_u16 = segment.load_be::<u16>();
+        // NOTE: WE NEED TO PAD segments chunks that are smaller than segment_size ON THE RIGHT!!
+        // this here pads depedingin on BitOrder: Lsb: right padding; Msb: left padding
+        let mut segment_u16 = segment.load_be::<u16>();
+
+        // to be generic over bitorder, we better do the padding ourselves!
+        // turns out we can just do that with bitshifts on the integer
+        // Msb:
+        // pad   | 
+        // 000000|1001101100
+        // shift by 6
+        // 1001101100|000000
+        // Lsb
+        // 1001101100|000000
+        // no need to do anything!
+        if segment.len() < self.segment_size {
+            segment_u16 =  segment_u16 << (self.segment_size - segment.len());
+        }        
     
         let (newstate, result) = self.lookup_table.lookup(self.state, segment_u16);
         self.state = newstate;   
@@ -168,7 +190,7 @@ mod test_iter {
     #[test]
     fn test_iter() {
         // just a 3number stream, trailing stuff
-        let bits = bits![usize, Lsb0; 
+        let bits = bits![u8, FFBitorder; 
             1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,
             0,1,1,1,0,0,1,0].to_bitvec();
         let table= LookupU16Vec::new();
@@ -183,7 +205,7 @@ mod test_iter {
         let table= LookupU16Vec::new();
 
         // what if not a single number is decoded per segment
-        let bits = bits![usize, Lsb0; 
+        let bits = bits![u8, FFBitorder; 
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
             0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0].to_bitvec();
         let mut f = FastFibonacciDecoder::new(&bits, &table, false);
@@ -193,7 +215,7 @@ mod test_iter {
         assert_eq!(f.get_remaining_buffer(), Some(&bits[19..]));
 
 
-        let bits = bits![usize, Lsb0; 
+        let bits = bits![u8, FFBitorder; 
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
             1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0].to_bitvec();
         let mut f = FastFibonacciDecoder::new(&bits, &table, false);
@@ -207,7 +229,7 @@ mod test_iter {
     fn test_iter_exact_borders() {
 
         // just a 3number stream, no trailing
-        let bits = bits![usize, Lsb0; 
+        let bits = bits![u8, FFBitorder; 
             1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,  // 4, 7, 86
             0,1,1,1,0,0,1,1,0,1,1,1,0,0,1,1  // 3, 2, 4
         ].to_bitvec();
@@ -221,7 +243,7 @@ mod test_iter {
     #[test]
     fn test_iter_remaining_stream() {
         // just a 3number stream, no trailing
-        let bits = bits![usize, Lsb0; 
+        let bits = bits![u8, FFBitorder; 
             1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,
             0,1,1,1,0,0,1,0].to_bitvec();
         let table= LookupU16Vec::new();
@@ -253,11 +275,10 @@ mod test_iter {
     fn test_correctness_iter() {
         use crate::fibonacci::FibonacciDecoder;
         use crate::fib_utils::random_fibonacci_stream;
-        // use crate::newpfd_bitvec::bitstream_to_string;
         let b = random_fibonacci_stream(100000, 1, 1000);
         // let b = dummy_encode(vec![64, 11, 88]);
         // make a copy for fast decoder
-        let mut b_fast: BitVec<usize, Lsb0> = BitVec::new();
+        let mut b_fast: BitVec<u8, FFBitorder> = BitVec::new();
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
@@ -293,13 +314,21 @@ pub struct DecodingResult {
 }
 
 // lookup using the bitvec as an action on the statemachine
-fn create_lookup(segment_size: usize) -> HashMap<(State, BitVec<usize, Lsb0>), (State, DecodingResult)> {
+fn create_lookup(segment_size: usize) -> HashMap<(State, FFBitvec), (State, DecodingResult)> {
     
-    let mut table: HashMap<(State, BitVec<usize, Lsb0>), (State, DecodingResult)> = HashMap::new();
+    let mut table: HashMap<(State, FFBitvec), (State, DecodingResult)> = HashMap::new();
 
     for lastbit in [true, false]{
         for s in 0..2.pow(segment_size) {
-            let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
+            // this one is dangerous, it depends on the bitorder!
+
+            // MSB: we need the last few bits
+            let t: usize = s.try_into().unwrap();
+            let bb = t.view_bits::<FFBitorder>();
+            let bitstream = bb[bb.len() - segment_size ..].to_owned();
+            // bitstream.reverse();
+            // LSB: we need the first few bits
+            // let bitstream = (s as usize).view_bits::<FFBitorder>()[..segment_size].to_owned();
             
             // determining the new state is a bit more tricky than just looking
             // at the last bit of the segment:
@@ -332,7 +361,12 @@ fn create_lookup(segment_size: usize) -> HashMap<(State, BitVec<usize, Lsb0>), (
             };
 
             let laststate = if lastbit {State(1)} else {State(0)};
-            table.insert((laststate, bitstream), (newstate, r));
+            
+            // converting to u8 storage
+            let mut b:BitVec<u8, FFBitorder> = BitVec::new();
+            b.extend(bitstream);
+            // println!("Inserting {}", b);
+            table.insert((laststate, b), (newstate, r));
         }
     }
     table
@@ -341,7 +375,7 @@ fn create_lookup(segment_size: usize) -> HashMap<(State, BitVec<usize, Lsb0>), (
 /// decodes a fibonacci stream until the very end of the stream
 /// there might be a remainder (behind the last 11 delimiter)
 /// which is also returned (its value in Fib, and its len in fib) 
-fn decode_with_remainder(bitstream: &BitSlice<usize, Lsb0>, lastbit_external: bool) -> DecodingResult{
+fn decode_with_remainder<T: BitStore,O:BitOrder>(bitstream: &BitSlice<T,O>, lastbit_external: bool) -> DecodingResult{
 
     assert!(bitstream.len() < 64, "fib-codes cant be longer than 64bit, something is wrong!");
     // println!("{}", bitstream_to_string(bitstream));
@@ -388,7 +422,7 @@ mod test_decode_with_remainder{
     fn test_decode_with_remainder_edge_case_delimiters() {
 
         // the exampel from the paper, Fig 9.4
-        let bits = bits![usize, Lsb0; 0,1,1,1,1];
+        let bits = bits![u8, FFBitorder; 0,1,1,1,1];
         let r = decode_with_remainder(bits, false);
         assert_eq!(
             r, 
@@ -400,7 +434,7 @@ mod test_decode_with_remainder{
     fn test_decode_with_remainder_edge_case_delimiters2() {
 
         // the exampel from the paper, Fig 9.4
-        let bits = bits![usize, Lsb0; 0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1].to_bitvec();
+        let bits = bits![u8, FFBitorder; 0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1].to_bitvec();
         let r = decode_with_remainder(&bits, false);
         assert_eq!(
             r, 
@@ -412,18 +446,18 @@ mod test_decode_with_remainder{
     fn test_decode_with_remainder_from_table94() {
 
         // the exampel from the paper, Fig 9.4
-        let mut bits = &181.view_bits::<Lsb0>()[..8];
+        let mut bits = &181_u8.view_bits::<FFBitorder>()[..8];
         // bits.reverse();
         
         println!("{bits:?}");
-        // let bits = bits![usize, Lsb0; 0,1,1,1,1];
+        // let bits = bits![u8, FFBitorder; 0,1,1,1,1];
         let r = decode_with_remainder(bits, false);
         assert_eq!(r.numbers, vec![4]);
         assert_eq!(r.u, 7);
         assert_eq!(r.lu, 4);
 
         // the exampel from the paper, Fig 9.4
-        let bits = &165_usize.view_bits::<Lsb0>()[..8];
+        let bits = &165_u8.view_bits::<FFBitorder>()[..8];
         println!("{:?}", bits);
         let r = decode_with_remainder(&bits, true);
         assert_eq!(r.numbers, vec![0]);
@@ -431,7 +465,7 @@ mod test_decode_with_remainder{
         assert_eq!(r.lu, 7);
 
         // the exampel from the paper, Fig 9.4
-        let bits = &114_usize.view_bits::<Lsb0>()[..8];
+        let bits = &114_u8.view_bits::<FFBitorder>()[..8];
         let r = decode_with_remainder(&bits, true);
         assert_eq!(r.numbers, vec![2]);
         assert_eq!(r.u, 6);
@@ -443,7 +477,7 @@ mod test_decode_with_remainder{
     fn test_decode_with_remainder() {
 
         // the exampel from the paper, Fig 9.4
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1];
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1];
         let r = decode_with_remainder(bits, false);
         assert_eq!(
             r, 
@@ -452,7 +486,7 @@ mod test_decode_with_remainder{
 
         // the exampel from the paper, Fig 9.4
         // no remainder this time
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1];
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1,1];
         let r = decode_with_remainder(bits, false);
         assert_eq!(
             r, 
@@ -461,7 +495,7 @@ mod test_decode_with_remainder{
     }
     #[test]
     fn test_decode_with_remainder_starts() {
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1, 0,1,1,0,0,0];
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1,1, 0,1,1,0,0,0];
         let r = decode_with_remainder(bits, false);
         assert_eq!(
             r, 
@@ -508,7 +542,7 @@ impl DecodingState {
 }
 
 /// 
-pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64> {
+pub fn fast_decode(stream: FFBitvec, segment_size: usize) -> Vec<u64> {
 
     let the_table = create_lookup(segment_size);
     let mut decoding_state = DecodingState::new();
@@ -527,7 +561,8 @@ pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64>
         let start = i*segment_size;
         let end = cmp::min((i+1)*segment_size, stream.len());
         let mut segment = stream[start..end].to_bitvec();
-        // // the last segment might be shorter, we need to pad it
+
+        // the last segment might be shorter, we need to pad it
         for _ in 0..segment_size-segment.len() {
             segment.push(false);
         }
@@ -538,7 +573,9 @@ pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64>
             println!("{state:?}, {segment:?}");
         }
 
+        // let debug = segment.clone();
         let (newstate, result) = the_table.get(&(state, segment)).unwrap();
+            // .unwrap_or_else(|| panic!("Hashmap doesnt have {:?} {:?}, Hashmap length {}", state, debug, the_table.len()));
 
         state = *newstate;
         // update the current decoding state:
@@ -551,7 +588,7 @@ pub fn fast_decode(stream: BitVec<usize, Lsb0>, segment_size: usize) -> Vec<u64>
 /// operating on 8bit seqgments
 /// we explicityl chop the bitstream into u8-segments
 /// -> each segment can be represented by a number, which solves the problem of slow hashmap access
-pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>, table: &impl U8Lookup) -> Vec<u64> {
+pub fn fast_decode_u8(stream: FFBitvec, table: &impl U8Lookup) -> Vec<u64> {
 
     let segment_size = 8;
     let mut decoding_state = DecodingState::new();
@@ -567,7 +604,26 @@ pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>, table: &impl U8Lookup) -> Vec
         // let start = i*segment_size;
         // let end = cmp::min((i+1)*segment_size, stream.len());
         // let segment = &stream[start..end];
-        let segment_u8 = segment.load_be::<u8>();
+
+        // NOTE: WE NEED TO PAD segments chunks that are smaller than segment_size ON THE RIGHT!!
+        // this here pads depedingin on BitOrder: Lsb: right padding; Msb: left padding
+
+        let mut segment_u8 = segment.load_be::<u8>();
+
+        // to be generic over bitorder, we better do the padding ourselves!
+        // turns out we can just do that with bitshifts on the integer
+        // Msb:
+        // pad   | 
+        // 000000|1001101100
+        // shift by 6
+        // 1001101100|000000
+        // Lsb
+        // 1001101100|000000
+        // now need to do anything!
+        if segment.len() < segment_size {
+            segment_u8 =  segment_u8 << (segment_size - segment.len());
+        }
+
         let (newstate, result) = table.lookup(state, segment_u8);
         state = newstate;
         // update the current decoding state:
@@ -580,7 +636,7 @@ pub fn fast_decode_u8(stream: BitVec<usize, Lsb0>, table: &impl U8Lookup) -> Vec
 /// operating on 16bit seqgments
 /// we explicityl chop the bitstream into u8-segments
 /// -> each segment can be represented by a number, which solves the problem of slow hashmap access
-pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>, table: &impl U16Lookup) -> Vec<u64> {
+pub fn fast_decode_u16(stream: FFBitvec, table: &impl U16Lookup) -> Vec<u64> {
 
     // println!("Total stream {}", bitstream_to_string(&stream));
     let segment_size = 16;
@@ -598,12 +654,36 @@ pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>, table: &impl U16Lookup) -> V
         // let start = i*segment_size;
         // let end = cmp::min((i+1)*segment_size, stream.len());
         // let segment = &stream[start..end];
-        let segment_u16 = segment.load_be::<u16>();
+
+        // NOTE: WE NEED TO PAD segments chunks that are smaller than segment_size ON THE RIGHT!!
+        // this here pads depedingin on BitOrder: Lsb: right padding; Msb: left padding
+        let mut segment_u16 = segment.load_be::<u16>();
+
+        // to be generic over bitorder, we better do the padding ourselves!
+        // turns out we can just do that with bitshifts on the integer
+        // Msb:
+        // pad   | 
+        // 000000|1001101100
+        // shift by 6
+        // 1001101100|000000
+        // Lsb
+        // 1001101100|000000
+        // now need to do anything!
+        if segment.len() < segment_size {
+            segment_u16 =  segment_u16 << (segment_size - segment.len());
+        }
+
         let (newstate, result) = table.lookup(state, segment_u16);
+
+        // println!("Segment: {}, SegmentInt {}", segment, segment_u16);
+        // println!("Decoded state: {:?}, result {:?}", newstate, result);
+
         state = newstate;
         // update the current decoding state:
         // add completely decoded numbers, deal with partially decoded numbers        
         decoding_state.update(result);
+        // println!("Updated state: {:?}", decoding_state);
+
     }
     decoding_state.decoded_numbers
 }
@@ -612,11 +692,35 @@ pub fn fast_decode_u16(stream: BitVec<usize, Lsb0>, table: &impl U16Lookup) -> V
 mod testing_fast_decode {
     use super::*;
     use pretty_assertions::assert_eq;
+    
+    #[test]
+    fn test_fast_decode_correct_padding() {
+        // if the chunk is smaller than the segmentsize, it becomes important how we pad it back to 
+        // sgementsize
+        // the exampel from the paper, Fig 9.4
+        let bits = bits![u8, FFBitorder; 
+            1,0,1,1].to_bitvec();
+
+        let r = fast_decode(bits.clone(), 8);
+        assert_eq!(r, vec![4]);
+
+        let table = LookupU8Vec::new();
+        let r = fast_decode_u8(bits.clone(), &table);
+        assert_eq!(r, vec![4]);
+
+        let table = LookupU16Vec::new();
+        let r = fast_decode_u16(bits, &table);
+        assert_eq!(r, vec![4]);    
+    }
+
     #[test]
     fn test_fast_decode() {
 
         // the exampel from the paper, Fig 9.4
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,0,1,1,1,0,0,1,0].to_bitvec();
+        let bits = bits![u8, FFBitorder; 
+            1,0,1,1,0,1,0,1,
+            1,0,1,0,0,1,0,1,
+            0,1,1,1,0,0,1,0].to_bitvec();
 
         let r = fast_decode(bits.clone(), 8);
         assert_eq!(r, vec![4,7, 86]);
@@ -634,7 +738,7 @@ mod testing_fast_decode {
     fn test_fast_decode_111_at_segment_border() {
         // edge case when the delimitator is algined with the segment and the next segment starts with 1
         // make sure to no double count 
-        let bits = bits![usize, Lsb0; 0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1].to_bitvec();
+        let bits = bits![u8, FFBitorder; 0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,1].to_bitvec();
         let r = fast_decode(bits.clone(), 8);
         assert_eq!(r, vec![21, 22]);
 
@@ -650,7 +754,7 @@ mod testing_fast_decode {
         // edge case when theres a bunch of 1111 at the end of the segment
         // we need to make sure that we dervie the new state correctly
 
-        let bits = bits![usize, Lsb0; 
+        let bits = bits![u8, FFBitorder; 
             0,1,1,1,0,1,1,1,
             1].to_bitvec();
         let expected = vec![2, 4, 1];
@@ -667,7 +771,7 @@ mod testing_fast_decode {
         assert_eq!(r, expected);   
 
         // fr the u16, we need a much longer segment
-        let bits = bits![usize, Lsb0; 
+        let bits = bits![u8, FFBitorder; 
             1,1,1,1,1,1,1,1,
             0,1,1,1,0,1,1,1,
             1].to_bitvec();
@@ -690,7 +794,7 @@ mod testing_fast_decode {
         let b = random_fibonacci_stream(100000, 1, 1000);
         // let b = dummy_encode(vec![64, 11, 88]);
         // make a copy for fast decoder
-        let mut b_fast: BitVec<usize, Lsb0> = BitVec::new();
+        let mut b_fast: BitVec<u8, FFBitorder> = BitVec::new();
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
@@ -698,7 +802,7 @@ mod testing_fast_decode {
         let x1: Vec<_> = dec.collect();
         let x2 = fast_decode(b_fast.clone(), 8);
 
-        println!("{:?}", bitstream_to_string(&b_fast));
+        // println!("{:?}", bitstream_to_string(&b_fast));
 
         assert_eq!(x1, x2);
     }
@@ -709,7 +813,7 @@ mod testing_fast_decode {
         use crate::fib_utils::random_fibonacci_stream;
         let b = random_fibonacci_stream(100000, 1, 1000);
         // make a copy for fast decoder
-        let mut b_fast: BitVec<usize, Lsb0> = BitVec::new();
+        let mut b_fast: BitVec<u8, FFBitorder> = BitVec::new();
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
@@ -731,7 +835,7 @@ mod testing_fast_decode {
         use crate::fib_utils::random_fibonacci_stream;
         let b = random_fibonacci_stream(1000000, 1, 1000);
         // make a copy for fast decoder
-        let mut b_fast: BitVec<usize, Lsb0> = BitVec::new();
+        let mut b_fast: BitVec<u8, FFBitorder> = BitVec::new();
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
         }
@@ -751,12 +855,12 @@ mod testing_fast_decode {
     fn test_fast_speed() {
         use crate::fib_utils::random_fibonacci_stream;
 
-        let b = random_fibonacci_stream(1000000, 100000, 1000000);
+        let b = random_fibonacci_stream(10_000_000, 100000, 1000000);
         // make a copy for fast decoder
-        let mut b_fast: BitVec<usize, Lsb0> = BitVec::new();
+        let mut b_fast: BitVec<u8, FFBitorder> = BitVec::new();
         for bit in b.iter().by_vals() {
             b_fast.push(bit);
-        }    
+        }
         // let x2 = fast_decode(b_fast.clone(), 8);
         let table = LookupU8Vec::new();
         let x2 = fast_decode_u8(b_fast.clone(), &table);
@@ -776,8 +880,9 @@ mod testing_fast_decode {
 
     }
 }
+
 /// just for debugging purpose
-pub fn bitstream_to_string<T:BitStore>(buffer: &BitSlice<T, Lsb0>) -> String{
+pub fn bitstream_to_string<T:BitStore, O:BitOrder>(buffer: &BitSlice<T, O>) -> String{
     let s = buffer.iter().map(|x| if *x{"1"} else {"0"}).join("");
     s
 }
@@ -798,14 +903,22 @@ impl LookupU8Vec {
     /// create a new Lookup table for fast fibonacci decoding using 8bit segments
     /// This implementation uses a Vec
     pub fn new() -> Self {
-        let segment_size = 8;
+        let segment_size = 8_usize;
 
         let mut table_state0 = Vec::new();
         let mut table_state1 = Vec::new();
     
         for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
-                let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
+                let t: u8 = s.try_into().unwrap();
+
+                // dangerous, depends on bitorder!!
+                // Msb: need to reveverse the bits, but if we keep it consistent with loading/storing, should be fine
+                let bitstream = t.view_bits::<FFBitorder>().to_owned();
+                assert_eq!(bitstream.len(), 8);
+
+                //Lsb: no need to change anything
+                // let bitstream = t.view_bits::<FFBitorder>()[..segment_size].to_owned();
                 
                 // determining the new state is a bit more tricky than just looking
                 // at the last bit of the segment:
@@ -870,15 +983,17 @@ impl LookupU8Hash {
     /// create a new Lookup table for fast fibonacci decoding using 8bit segments
     /// This implementation uses a HashMap
     pub fn new() -> Self {
-        let segment_size = 8;
+        let segment_size = 8_usize;
 
         let mut table_state0 = HashMap::new();
         let mut table_state1 = HashMap::new();
     
         for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
-                let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
-                
+                let t: u8 = s.try_into().unwrap();
+                let bitstream = t.view_bits::<FFBitorder>().to_owned();
+                assert_eq!(bitstream.len(), 8);
+
                 // determining the new state is a bit more tricky than just looking
                 // at the last bit of the segment:
                 // 1. if the segment terminated with (11), this resets the state to 0
@@ -896,7 +1011,7 @@ impl LookupU8Hash {
                 // We get the number of bits after the last terminator and can hence
                 // pull out all the bits in questions
 
-                                let r = decode_with_remainder(&bitstream, lastbit);
+                let r = decode_with_remainder(&bitstream, lastbit);
                 
                 // we need to know the bits behind the last terminator
                 let trailing_bits= &bitstream[bitstream.len()-r.lu..];
@@ -948,15 +1063,16 @@ impl LookupU16Vec {
     /// create a new Lookup table for fast fibonacci decoding using 16bit segments
     /// This implementation uses a vec
     pub fn new() -> Self {
-        let segment_size = 16;
+        let segment_size = 16_usize;
 
         let mut table_state0 = Vec::new();
         let mut table_state1 = Vec::new();
     
         for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
-                let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
-                
+                let t: u16 = s.try_into().unwrap();
+                let bitstream = t.view_bits::<FFBitorder>().to_owned();
+                assert_eq!(bitstream.len(), 16);
                 // determining the new state is a bit more tricky than just looking
                 // at the last bit of the segment:
                 // 1. if the segment terminated with (11), this resets the state to 0
@@ -1021,14 +1137,16 @@ impl LookupU16Hash {
     /// create a new Lookup table for fast fibonacci decoding using 16bit segments
     /// This implementation uses a HashMap
     pub fn new() -> Self {
-        let segment_size = 16;
+        let segment_size = 16_usize;
 
         let mut table_state0 = HashMap::new();
         let mut table_state1 = HashMap::new();
     
         for lastbit in [true, false]{
             for s in 0..2.pow(segment_size) {
-                let bitstream = (s as usize).view_bits_mut::<Lsb0>()[..segment_size].to_owned();
+                let t: u16 = s.try_into().unwrap();
+                let bitstream = t.view_bits::<FFBitorder>().to_owned();
+                assert_eq!(bitstream.len(), 16);
                 
                 // determining the new state is a bit more tricky than just looking
                 // at the last bit of the segment:
@@ -1093,7 +1211,7 @@ mod testing_lookups {
     #[test]
     fn test_u8vec() {
         let t = LookupU8Vec::new();
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].to_bitvec();
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1].to_bitvec();
         let i = bits.load_be::<u8>();
 
         assert_eq!(
@@ -1101,7 +1219,7 @@ mod testing_lookups {
             (State(1), &DecodingResult {numbers: vec![4], u:7, lu: 4, number_end_in_segment: vec![3]})
         );
 
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
+        let i = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1].load_be::<u8>();
         assert_eq!(
             t.lookup(State(1), i), 
             (State(1), &DecodingResult {numbers: vec![0, 2], u:7, lu: 4, number_end_in_segment: vec![0, 3]})
@@ -1111,14 +1229,14 @@ mod testing_lookups {
     #[test]
     fn test_u8hash() {
         let t = LookupU8Hash::new();
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
+        let i = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1].load_be::<u8>();
 
         assert_eq!(
             t.lookup(State(0), i), 
             (State(1), &DecodingResult {numbers: vec![4], u:7, lu: 4, number_end_in_segment: vec![3,]})
         );
 
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1].load_be::<u8>();
+        let i = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1].load_be::<u8>();
         assert_eq!(
             t.lookup(State(1), i), 
             (State(1), &DecodingResult {numbers: vec![0, 2], u:7, lu: 4, number_end_in_segment: vec![0, 3]})
@@ -1128,14 +1246,14 @@ mod testing_lookups {
     #[test]
     fn test_u16vec() {
         let t = LookupU16Vec::new();
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+        let i = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
 
         assert_eq!(
             t.lookup(State(0), i), 
             (State(1), &DecodingResult {numbers: vec![4, 28], u:5, lu: 4, number_end_in_segment: vec![3, 11]})
         );
 
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+        let i = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
         assert_eq!(
             t.lookup(State(1), i), 
             (State(1), &DecodingResult {numbers: vec![0, 2, 28], u:5, lu: 4, number_end_in_segment: vec![0,3,11]})
@@ -1144,14 +1262,14 @@ mod testing_lookups {
     #[test]
     fn test_u16hash() {
         let t = LookupU16Hash::new();
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+        let i = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
 
         assert_eq!(
             t.lookup(State(0), i), 
             (State(1), &DecodingResult {numbers: vec![4, 28], u:5, lu: 4, number_end_in_segment: vec![3,11]})
         );
 
-        let i = bits![usize, Lsb0; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
+        let i = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1, 0,0,1,1,0,0,0,1].load_be::<u16>();
         assert_eq!(
             t.lookup(State(1), i), 
             (State(1), &DecodingResult {numbers: vec![0, 2, 28], u:5, lu: 4, number_end_in_segment: vec![0,3,11]})
@@ -1160,7 +1278,7 @@ mod testing_lookups {
     #[test]
     fn test_decode_u8_vec() {
         let t = LookupU8Vec::new();
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0].to_bitvec();
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0].to_bitvec();
 
         assert_eq!(
             fast_decode_u8(bits, &t),
@@ -1171,7 +1289,7 @@ mod testing_lookups {
     #[test]
     fn test_decode_u8_hash() {
         let t = LookupU8Hash::new();
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0].to_bitvec();
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0].to_bitvec();
 
         assert_eq!(
             fast_decode_u8(bits, &t), 
@@ -1182,7 +1300,7 @@ mod testing_lookups {
     #[test]
     fn test_decode_u16_vec() {
         let t = LookupU16Vec::new();
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0,   1,0,1, 1].to_bitvec();
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0,   1,0,1, 1].to_bitvec();
 
         assert_eq!(
             fast_decode_u16(bits, &t), 
@@ -1193,7 +1311,7 @@ mod testing_lookups {
     #[test]
     fn test_decode_u16_hash() {
         let t = LookupU16Hash::new();
-        let bits = bits![usize, Lsb0; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0,   1,0,1, 1].to_bitvec();
+        let bits = bits![u8, FFBitorder; 1,0,1,1,0,1,0,1,   0, 1, 0, 0, 0, 1, 1, 0,   1,0,1, 1].to_bitvec();
 
         assert_eq!(
             fast_decode_u16(bits, &t), 

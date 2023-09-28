@@ -165,15 +165,15 @@ fn fast_decode_vs_regular(c: &mut Criterion){
     // create a long fib string
     let data = random_fibonacci_stream(1_000_000, 1, 10000);
     // make a copy for fast decoder
-    let mut data_fast: BitVec<usize, Lsb0> = BitVec::new();
+    let mut data_fast: MyBitVector = BitVec::new();
     for bit in data.iter().by_vals() {
         data_fast.push(bit);
     }
 
-    c.bench_function(
-        &format!("fast decode"),
-        |b| b.iter(|| fast_decode(black_box(data_fast.clone()), black_box(8)))
-    );
+    // c.bench_function(
+    //     &format!("fast decode"),
+    //     |b| b.iter(|| fast_decode(black_box(data_fast.clone()), black_box(8)))
+    // );
 
     let table = LookupU8Vec::new();
     c.bench_function(
@@ -187,20 +187,20 @@ fn fast_decode_vs_regular(c: &mut Criterion){
         |b| b.iter(|| fast_decode_u16(black_box(data_fast.clone()), black_box(&table)))
     );
 
-    let table = LookupU8Hash::new();
-    c.bench_function(
-        &format!("fast hash u8-decode"),
-        |b| b.iter(|| fast_decode_u8(black_box(data_fast.clone()), black_box(&table)))
-    );
+    // let table = LookupU8Hash::new();
+    // c.bench_function(
+    //     &format!("fast hash u8-decode"),
+    //     |b| b.iter(|| fast_decode_u8(black_box(data_fast.clone()), black_box(&table)))
+    // );
 
-    let table = LookupU16Hash::new();
-    c.bench_function(
-        &format!("fast hash u16-decode"),
-        |b| b.iter(|| fast_decode_u16(black_box(data_fast.clone()), black_box(&table)))
-    );
+    // let table = LookupU16Hash::new();
+    // c.bench_function(
+    //     &format!("fast hash u16-decode"),
+    //     |b| b.iter(|| fast_decode_u16(black_box(data_fast.clone()), black_box(&table)))
+    // );
 
 
-    fn dummy_fast_iter(data_fast: &BitSlice<usize, Lsb0>, table: &LookupU16Vec) -> Vec<u64> {
+    fn dummy_fast_iter(data_fast: &BitSlice<u8, Msb0>, table: &LookupU16Vec) -> Vec<u64> {
         let f = FastFibonacciDecoder::new(data_fast.clone(), table, false);
         let x: Vec<_> = f.collect();
         x
@@ -213,7 +213,7 @@ fn fast_decode_vs_regular(c: &mut Criterion){
     );
  
 
-    fn dummy(bv: BitVec<u8, Msb0>) -> Vec<u64> {
+    fn dummy(bv: MyBitVector) -> Vec<u64> {
         let dec = FibonacciDecoder::new(&bv, false);
         let x: Vec<_> = dec.collect();
         // println!("{}", x.len());
@@ -232,5 +232,6 @@ fn fast_decode_vs_regular(c: &mut Criterion){
 
 criterion_group!(benches, fast_decode_vs_regular);
 // criterion_group!(benches, newpfd_encode_decode, fibonacci_encode, fibonacci_decode);
+// criterion_group!(benches, newpfd_encode_decode);
 // criterion_group!(benches, fibonacci_decode);
 criterion_main!(benches);

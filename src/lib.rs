@@ -78,6 +78,29 @@ pub mod fib_utils;
 // because  1 2 4 8
 //          0 0 0 1
 //
+/// #######################3
+/// # IT DOES MATTER HERE:
+/// 1 . PrimaryBuffer.add_element()
+///   This calls self.buffer[..stuff...].store_be::<u64>(el)
+///   which is stores only the lowest bits!
+///   yet .load() depends on the BitOrder. 
+///   If it's Lsb, it'll truncate to the least significant bits BUT put the least siginifcant bit in front (towards index=0)
+///   If it's Msb, it'll truncate and put the least significant bit words the end
+///  in essence 4 (4*1+0*2+0*1 = b100) becomes `001` in Lsb and `100` in Msb
+/// 2. decode_primary_buf_element()
+///    Pretty much the inverse of 1) 
+/// Now, what we just have to make sure is that the coder and decoder write/read in a consistent fashion.
+/// 
+/// ACtaully, we can decouple the BitVec type used in PrimaryBuffer from everythin else!!
+/// The whole rest of the crate is agnostic of BitOrder, any integers are encoded as Fibonacci anyways
+/// 
+/// Turns out that in theory, we can decouple the Msb-required Primary buffer from the rest, but at a 
+/// SIGNINFCANT PERFORMANCE HIT: converting Lsb->Msb (via extending an empty Lsb) is very slow!!
+/// 
+/// Also, there's a few places where the BitOrder actually matters in FastFibonacci,
+/// e.g. turning an incoming bitstream-segment into an integer for lookup in FastFibonacciDecoder::load_segment()
+/// or the analogous funtions for the non iterators (fast_decode_u8() etc)
+/// 
 use bitvec::prelude as bv;
 
 /// The type of bitvector used in the crate.
