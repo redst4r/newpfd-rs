@@ -40,7 +40,10 @@ pub struct FastFibonacciDecoder<'a>  {
     current_backtrack: VecDeque<Option<usize>>,  // for each decoded number in current_buffer, remember how many bits its encoding was
     state: State,
     decoding_state: DecodingState,
-    last_emission_last_position: Option<usize>, //position in bitstream after the last emission; None if we exhausted the stream completely
+    // position in bitstream after the last emission; 
+    // None if we exhausted the stream completely, 
+    // i.e. the stream ended with a terminator and we emitted that item
+    last_emission_last_position: Option<usize>, 
     shifted_by_one: bool,
 
 }
@@ -56,33 +59,15 @@ impl <'a>  FastFibonacciDecoder<'a>  {
             segment_size: u16::BITS as usize,
             state: State(0),
             decoding_state: DecodingState::new(),
-            last_emission_last_position: Some(0),
+            last_emission_last_position: None,
             shifted_by_one,
         }
     }
 
-    /// return the remaining bitstream after the last yielded number
-    /// if the bitstream isfull exhausted (i.e. no remainder), return None
-    pub fn get_remaining_buffer(&self) -> Option<&'a FFBitslice>{
-        match self.last_emission_last_position {
-            Some(pos) =>  Some(&self.bistream[pos+1..]),
-            None => None
-        }
-    }
-
-    ///
-    pub fn get_bits_processed(&self) -> usize {
-        match self.last_emission_last_position {
-            Some(pos) =>  pos,
-            None => todo!()
-        }
-    }
-
     /// decodes the next segment, adding to current_buffer and current_backtrack
-    /// if theres nothgin to any more load (emtpy buffer, or partial buffer with some elements)
-    /// it adds a None to to current_buffer and current_backtrack, indicating the end of the iterator
+    /// if theres nothgin to any more load (emtpy buffer, or partial buffer with some elements, but no terminator)
+    /// it adds a None to `current_buffer` and `current_backtrack`, indicating the end of the iterator
     fn load_segment(&mut self) {
-        // println!("Empty buffer");
         // try to pull in the next segment
         // let segment = self.get_next_segment();
         let start = self.position;
@@ -129,7 +114,7 @@ impl <'a>  FastFibonacciDecoder<'a>  {
         for el in self.decoding_state.decoded_numbers.drain(0..self.decoding_state.decoded_numbers.len()) {
             self.current_buffer.push_back(Some(el))
         }
-        // move all decoded numbers starts into the emission buffer
+        // move all decoded number-starts into the emission buffer
         // no need to delete in result, gets dropped
         for &el in result.number_end_in_segment.iter() {
             self.current_backtrack.push_back(Some(el+start)); // turn the relative (to segment start) into an absolute postion
@@ -149,6 +134,26 @@ impl <'a>  FastFibonacciDecoder<'a>  {
 
 }
 
+impl <'a> FbDec<'a> for FastFibonacciDecoder<'a> {
+    /// return the remaining bitstream after the last yielded number
+    /// if the bitstream isfull exhausted (i.e. no remainder), return None
+    fn get_remaining_buffer(&self) -> &'a FFBitslice{
+        match self.last_emission_last_position {
+            Some(pos) =>  &self.bistream[pos+1..],
+            None => &self.bistream  // no single element was emitted, hence no bits of the stream affected
+        }
+    }
+
+    /// should point to the first bit after the last terminator ie. ...11x...
+    fn get_bits_processed(&self) -> usize {
+        match self.last_emission_last_position {
+            Some(pos) =>  pos+1,
+            None => 0, // no single element was emitted, hence no bits of the stream affected
+        }
+    }
+}
+
+
 /// The iterator is a bit complicated! We cant decode a single number, 
 /// only an entire segment, hence we need to buffer the decoded numbers, yielding 
 /// them one by one.
@@ -159,7 +164,7 @@ impl <'a>Iterator for FastFibonacciDecoder<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
 
-        while self.current_buffer.is_empty() {  // should be: while buffer is empty, keep loading new segments!
+        while self.current_buffer.is_empty() { // could be that we need to load multiple segments until we gind a terminator!
             self.load_segment();
         }
         // } else {
@@ -171,7 +176,12 @@ impl <'a>Iterator for FastFibonacciDecoder<'a> {
 
         let el = self.current_buffer.pop_front().unwrap(); // unwrap should be save, there HAS to be an element
         let _dummy = self.current_backtrack.pop_front().unwrap();// unwrap should be save, there HAS to be an element
-        self.last_emission_last_position = _dummy;
+        
+        // we only update the last elements position if we actually emit an item
+        // if were just emitting the Iteration-TRM, the position of the last element remains unchanged
+        if let Some(i) = _dummy {
+            self.last_emission_last_position = Some(i);
+        };
 
         // println!("State after emission: Position {}, LastPos {:?}, Buffer {:?} starts: {:?}", self.position, self.last_emission_last_position, self.current_buffer, self.current_backtrack);
         if self.shifted_by_one {
@@ -212,7 +222,7 @@ mod test_iter {
 
         // let x = f.collect::<Vec<_>>();
         assert_eq!(f.next(), Some(4181));
-        assert_eq!(f.get_remaining_buffer(), Some(&bits[19..]));
+        assert_eq!(f.get_remaining_buffer(), &bits[19..]);
 
 
         let bits = bits![u8, FFBitorder; 
@@ -222,7 +232,7 @@ mod test_iter {
 
         // let x = f.collect::<Vec<_>>();
         assert_eq!(f.next(), Some(1597));
-        assert_eq!(f.get_remaining_buffer(), Some(&bits[17..]));        
+        assert_eq!(f.get_remaining_buffer(), &bits[17..]);        
     }
 
     #[test]
@@ -250,27 +260,44 @@ mod test_iter {
         
         let mut f = FastFibonacciDecoder::new(&bits, &table, false);
         assert_eq!(f.next(), Some(4));
-        assert_eq!(f.get_remaining_buffer(), Some(&bits[4..]));
+        assert_eq!(f.get_bits_processed(), 4);
+        assert_eq!(f.get_remaining_buffer(), &bits[4..]);
 
         let mut f = FastFibonacciDecoder::new(&bits, &table, false);
         assert_eq!(f.next(), Some(4));
         assert_eq!(f.next(), Some(7));
-        assert_eq!(f.get_remaining_buffer(), Some(&bits[9..]));
+        assert_eq!(f.get_bits_processed(), 9);
+        assert_eq!(f.get_remaining_buffer(), &bits[9..]);
 
         let mut f = FastFibonacciDecoder::new(&bits, &table, false);
         assert_eq!(f.next(), Some(4));
         assert_eq!(f.next(), Some(7));
         assert_eq!(f.next(), Some(86));
-        assert_eq!(f.get_remaining_buffer(), Some(&bits[19..]));
+        assert_eq!(f.get_bits_processed(), 19);
+        assert_eq!(f.get_remaining_buffer(), &bits[19..]);
 
         let mut f = FastFibonacciDecoder::new(&bits, &table, false);
         assert_eq!(f.next(), Some(4));
         assert_eq!(f.next(), Some(7));
         assert_eq!(f.next(), Some(86));
         assert_eq!(f.next(), None);
-        assert_eq!(f.get_remaining_buffer(), None);
+        assert_eq!(f.get_bits_processed(), 19);
+        assert_eq!(f.get_remaining_buffer(), &bits[19..]);
     }
 
+    #[test]
+    fn test_iter_remaining_stream_nobits_processed() {
+        // no terminator anywhere
+        let bits = bits![u8, FFBitorder; 
+        1,0,0,1,0,1,0,0,1,0,1,0,0,1,0,1,
+        0,1,0,1,0,0,1,0].to_bitvec();
+        let table= LookupU16Vec::new();
+        
+        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        assert_eq!(f.next(), None);
+        assert_eq!(f.get_bits_processed(), 0);
+        assert_eq!(f.get_remaining_buffer(), &bits);
+    }
     #[test]
     fn test_correctness_iter() {
         use crate::fibonacci::FibonacciDecoder;
@@ -1055,6 +1082,7 @@ pub trait U16Lookup {
     fn lookup(&self, s: State, segment: u16) -> (State, &DecodingResult);
 }
 /// Vector based lookup table for u8
+#[derive(Debug)]
 pub struct LookupU16Vec {
     table_state0: Vec<(State, DecodingResult)>,
     table_state1: Vec<(State, DecodingResult)>,

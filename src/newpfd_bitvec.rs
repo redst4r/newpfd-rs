@@ -3,7 +3,7 @@
 
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
-use crate::{fibonacci::{self, fib_enc_multiple_fast}, fibonacci_fast::{LookupU16Vec, FastFibonacciDecoder}};
+use crate::{fibonacci::{self, fib_enc_multiple_fast, FbDec}, fibonacci_fast::{LookupU16Vec, FastFibonacciDecoder}};
 use crate::{MyBitSlice, MyBitVector};
 
 /// round an integer to the next bigger multiple

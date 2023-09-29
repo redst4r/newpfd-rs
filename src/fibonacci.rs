@@ -143,6 +143,19 @@ pub fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
     sum
 }
 
+///
+pub trait FbDec<'a>: Iterator<Item=u64> {
+
+    /// Returns the buffer behind the last bit processed.
+    /// Comes handy when the buffer contains data OTHER than fibonacci encoded 
+    /// data that needs to be processed externally.
+    fn get_remaining_buffer(&self) -> &'a MyBitSlice;
+
+    /// how far did we process into the buffer (pretty much the first bit after a 11).
+    fn get_bits_processed(&self) -> usize;
+
+}
+
 /// Decoder for Fibonacci encoded integer sequences
 /// 
 /// Constructed from a bufffer (a binary sequence) which is gradually processed
@@ -172,15 +185,17 @@ impl <'a> FibonacciDecoder<'a> {
         FibonacciDecoder { buffer, current_pos:0, shifted_by_one}
     }
 
+}
+impl <'a> FbDec<'a> for FibonacciDecoder<'a> {
     /// Returns the buffer behind the last bit processed.
     /// Comes handy when the buffer contains data OTHER than fibonacci encoded 
     /// data that needs to be processed externally.
-    pub fn get_remaining_buffer(&self) -> &'a MyBitSlice{
+    fn get_remaining_buffer(&self) -> &'a MyBitSlice{
         &self.buffer[self.current_pos..]
     }
 
     /// how far did we process into the buffer (pretty much the first bit after a 11).
-    pub fn get_bits_processed(&self) -> usize{
+    fn get_bits_processed(&self) -> usize{
         self.current_pos
     }
 }
