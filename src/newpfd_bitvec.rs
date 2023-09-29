@@ -488,7 +488,8 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
 
 #[cfg(test)]
 mod test {
-    use rand::{distributions::Uniform, prelude::Distribution};
+    use rand::{distributions::{Uniform}, prelude::Distribution};
+    use rand_distr::Geometric;
     use super::*;
     #[test]
     fn test_larger_ecs_22() {
@@ -565,6 +566,40 @@ mod test {
     }
 
     #[test]
+    fn test_encode_some_exceptions() {
+        let input = vec![0,1,0, 1, 0, 1,1,1,0,10];
+
+        let params = NewPFDBlock::get_encoding_params(&input, 0.9);
+        // println!("{} {}", params.min_element, params.b_bits);
+
+        let mut n = crate::newpfd_bitvec::NewPFDBlock::new(params.b_bits,  32);
+        let _encoded = n.encode(&input, params.min_element);
+
+        assert_eq!(n.exceptions.len(), 1);
+        assert_eq!(n.index_gaps.len(), 1);
+
+
+        // note: using a uniform distribution, we'll actually never get any exceptions
+        // At least half the numbers depend on the highest bit, i.e. we'll never be able to shave of a bit with a 90% threshold
+        let n = 512;
+        let data_dist = Geometric::new(0.05).unwrap();
+        let mut rng = rand::thread_rng();
+        let mut data: Vec<u64> = Vec::with_capacity(n);
+        for _ in 0..n {
+            data.push(data_dist.sample(&mut rng));
+        }
+        println!("{:?} ", data);
+
+        let params = NewPFDBlock::get_encoding_params(&data, 0.9);
+        println!("{} {}", params.min_element, params.b_bits);
+
+        let mut n = crate::newpfd_bitvec::NewPFDBlock::new(params.b_bits,  512);
+        let _encoded = n.encode(&data, params.min_element);
+        
+    }
+
+
+    #[test]
     fn test_newpfd_codec_encode_decode() {
         let input = vec![0_u64,1,0, 1];
         let (encoded, n_el) = crate::newpfd_bitvec::encode(input.iter().cloned(), 32);
@@ -620,7 +655,8 @@ mod test {
     fn test_encode_speed() {
         // some random data
         let n = 1_000_000;
-        let data_dist = Uniform::from(0..255);
+        // let data_dist = Uniform::from(0..255);
+        let data_dist = Geometric::new(0.01).unwrap();
         let mut rng = rand::thread_rng();
         let mut data: Vec<u64> = Vec::with_capacity(n);
         for _ in 0..n {
@@ -630,6 +666,33 @@ mod test {
         let blocksize = 512;
         let _enc = encode(data.into_iter(), blocksize);
     }
+
+    #[test]
+    fn test_encode__decode_speed() {
+        // some random data
+        let n = 10_000_000;
+        // let data_dist = Uniform::from(0..255);
+        let data_dist = Geometric::new(0.01).unwrap();
+        let mut rng = rand::thread_rng();
+        let mut data: Vec<u64> = Vec::with_capacity(n);
+        for _ in 0..n {
+            data.push(data_dist.sample(&mut rng));
+        }
+
+        let blocksize = 512;
+        let (_enc, _) = encode(data.iter().cloned(), blocksize);
+
+        let dec = NewPDFDecoderFastFib::new();
+        let (decoded_data,_) = dec.decode(&_enc, n, blocksize);
+
+        assert_eq!(decoded_data, data);
+
+
+        let (decoded_data2, _) = decode(&_enc, n, blocksize);
+        assert_eq!(decoded_data2, data);
+
+    }
+
 
     mod test_primary {
         use crate::newpfd_bitvec::PrimaryBuffer;

@@ -8,6 +8,7 @@ use newpfd::fibonacci_fast::{fast_decode, fast_decode_u8, fast_decode_u16, Looku
 use newpfd::fibonacci_old::fib_enc_multiple;
 use newpfd::{newpfd_bitvec::{encode, decode}, fibonacci::FIB64};
 use rand::distributions::{Distribution, Uniform};
+use rand_distr::Geometric;
 
 // type MyBitSlice = BitSlice<u8, Msb0>;
 type MyBitVector = BitVec<u8, Msb0>;
@@ -28,7 +29,9 @@ fn newpfd_encode_decode(c: &mut Criterion){
     }
 
     let n = 1_000_000;
-    let data_dist = Uniform::from(0..255);
+    // let data_dist = Uniform::from(0..255);
+    let data_dist = Geometric::new(0.01).unwrap();
+
     let mut rng = rand::thread_rng();
     let mut data: Vec<u64> = Vec::with_capacity(n);
     for _ in 0..n {

@@ -20,6 +20,7 @@ itertools="0.11"
 fibonacci_codec="0.2" # TODO: remove this old depenency
 bit-vec="0.6"  # TODO: remove this old depenency
 rand = "0.8"
+rand_distr = "0.4.3"
 num = "0.4"
 
 [dev-dependencies]
