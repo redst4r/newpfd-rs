@@ -14,7 +14,26 @@
 //! Turns out that the implementation details are pretty important. 
 //! Implementing a simple lookup table as a HashMap<Segment, ...> is actually **slower** than simple bit-by-bit decoding.
 //! One has to exploit the fact that a segment can be represented by an integer,
-//! and store the results in a vec, indexed by the segment
+//! and store the results in a vec, indexed by the segment. That is, we create a **Lookup table** (see [U8Lookup] and [U16Lookup] traits) which we can quickly query for incoming segments.
+//! 
+//! # Example
+//! ```rust
+//! use newpfd::fibonacci_fast::{fast_decode_u8,fast_decode_u16, LookupU8Vec, LookupU16Vec };
+//! use bitvec::prelude as bv;
+//! let bits = bv::bits![u8, bv::Msb0; 
+//!     1,0,1,1,0,1,0,1,
+//!     1,0,1,0,0,1,0,1,
+//!     0,1,1,1,0,0,1,0].to_bitvec();
+//! // using a u8 lookup table
+//! let table = LookupU8Vec::new();
+//! let r = fast_decode_u8(bits.clone(), &table);
+//! assert_eq!(r, vec![4,7, 86]);
+//! 
+//! // using a u16 table
+//! let table = LookupU16Vec::new();
+//! let r = fast_decode_u16(bits.clone(), &table);
+//! assert_eq!(r, vec![4,7, 86]);
+//! ```
 
 use std::{collections::{HashMap, VecDeque}, hash::Hash};
 use bitvec::{vec::BitVec, field::BitField, view::BitView};
@@ -35,7 +54,30 @@ pub (crate) static FB_LOOKUP: Lazy<LookupU8Vec> = Lazy::new(|| {
     LookupU8Vec::new()
 });
 
-/// rr
+/// Fast Fibonacci decoding via an iterator. Let's you decode on element after the other,
+/// whereas [fast_decode_u8], [fast_decode_u16] decode the entire stream at once. 
+/// Using the iterator can be useful if the length of the binary-fibonacci code is not known, just the nubmer of elements.
+/// 
+/// # Example
+/// ```rust,
+/// use newpfd::fibonacci_fast::{FastFibonacciDecoder};
+/// use bitvec::prelude as bv;
+/// let bits = bv::bits![u8, bv::Msb0; 
+///     1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,
+///     0,1,1,1,0,0,1,0].to_bitvec();
+/// // second argument allows for automatic shifing the decoded values by -1 
+/// // (in case the encoding used +1 to be able to encode 0)
+/// let f = FastFibonacciDecoder::new(&bits, false);
+/// 
+/// let x = f.collect::<Vec<_>>();
+/// assert_eq!(x, vec![4,7, 86]);
+/// 
+/// // on can still use the remaining buffer for other things:
+/// //use crate::newpfd::fibonacci::FbDec;
+/// //let r = f.get_remaining_buffer();
+/// //assert_eq!(r, &bits[19..]);        
+
+/// ```
 pub struct FastFibonacciDecoder<'a>  {
     bistream: &'a FFBitslice, // bitstream to decode
     position: usize,
@@ -53,7 +95,10 @@ pub struct FastFibonacciDecoder<'a>  {
 
 }
 impl <'a>  FastFibonacciDecoder<'a>  {
-    ///
+    /// New FastFibonacciDecoder
+    /// # Parameters
+    /// - bistream: (possibly infinite) sequence of bits containing fibonacci encoded u64s
+    /// - shifted_by_one: if True, values are decremented by one (in case the encoding used a +1 shift to encode 0)
     pub fn new(bistream: &'a FFBitslice, shifted_by_one: bool) -> Self {
         FastFibonacciDecoder {
             bistream,
@@ -140,8 +185,8 @@ impl <'a>  FastFibonacciDecoder<'a>  {
 }
 
 impl <'a> FbDec<'a> for FastFibonacciDecoder<'a> {
-    /// return the remaining bitstream after the last yielded number
-    /// if the bitstream isfull exhausted (i.e. no remainder), return None
+    /// return the remaining bitstream after the last yielded number.
+    /// If the bitstream is fully exhausted (i.e. no remainder), returns an empty bitslice.
     fn get_remaining_buffer(&self) -> &'a FFBitslice{
         match self.last_emission_last_position {
             Some(pos) =>  &self.bistream[pos+1..],
@@ -149,7 +194,13 @@ impl <'a> FbDec<'a> for FastFibonacciDecoder<'a> {
         }
     }
 
-    /// should point to the first bit after the last terminator ie. ...11x...
+    /// Points to the first bit after the last terminator:
+    /// ```bash
+    /// ..011x...
+    ///      ^
+    /// ```
+    /// If nothing was processed, or no single u64 could be decoded (no terminator), 
+    /// points to the first bit in the string.
     fn get_bits_processed(&self) -> usize {
         match self.last_emission_last_position {
             Some(pos) =>  pos+1,
@@ -159,7 +210,8 @@ impl <'a> FbDec<'a> for FastFibonacciDecoder<'a> {
 }
 
 
-/// The iterator is a bit complicated! We cant decode a single number, 
+/// The iterator is a bit complicated! We can't decode a single number 
+/// (as the fast algorithm will potentially yield multiple numbers per segment), 
 /// only an entire segment, hence we need to buffer the decoded numbers, yielding 
 /// them one by one.
 /// 
@@ -566,7 +618,8 @@ impl DecodingState {
     }
 }
 
-/// 
+/// Reference implementation, very inefficient though. Use [fast_decode_u8] or [fast_decode_u16]
+/// for actual applications.
 pub fn fast_decode(stream: FFBitvec, segment_size: usize) -> Vec<u64> {
 
     let the_table = create_lookup(segment_size);
@@ -610,9 +663,9 @@ pub fn fast_decode(stream: FFBitvec, segment_size: usize) -> Vec<u64> {
     decoding_state.decoded_numbers
 }
 
-/// operating on 8bit seqgments
-/// we explicityl chop the bitstream into u8-segments
-/// -> each segment can be represented by a number, which solves the problem of slow hashmap access
+/// Decode a fibonacci stream using the Fast algorithm operating on 8bit segments.
+// We explicityl chop the bitstream into u8-segments
+// -> each segment can be represented by a number, which solves the problem of slow hashmap access
 pub fn fast_decode_u8(stream: FFBitvec, table: &impl U8Lookup) -> Vec<u64> {
 
     let segment_size = 8;
@@ -658,9 +711,9 @@ pub fn fast_decode_u8(stream: FFBitvec, table: &impl U8Lookup) -> Vec<u64> {
     decoding_state.decoded_numbers
 }
 
-/// operating on 16bit seqgments
-/// we explicityl chop the bitstream into u8-segments
-/// -> each segment can be represented by a number, which solves the problem of slow hashmap access
+/// Decode a fibonacci stream using the Fast algorithm operating on 16bit segments.
+// We explicityl chop the bitstream into u16-segments
+// -> each segment can be represented by a number, which solves the problem of slow hashmap access
 pub fn fast_decode_u16(stream: FFBitvec, table: &impl U16Lookup) -> Vec<u64> {
 
     // println!("Total stream {}", bitstream_to_string(&stream));
@@ -913,8 +966,8 @@ pub fn bitstream_to_string<T:BitStore, O:BitOrder>(buffer: &BitSlice<T, O>) -> S
 
 /// Fast Fibonacci decoding lookup table for 8bit segments
 pub trait U8Lookup {
-    /// given the state of the last decoding operation and the new segment, returns
-    /// the (precomputed) new state and decoding result
+    /// Given the state of the last decoding operation and the new segment, returns
+    /// the (precomputed) new state and decoding result.
     fn lookup(&self, s: State, segment: u8) -> (State, &DecodingResult);
 }
 

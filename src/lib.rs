@@ -4,9 +4,9 @@
 //! 
 //! # Overview
 //! The algorithm splits the intput data (u64) into blocks of size `blocksize`.
-//! For each block, choose a bit_width, such that 90% of the block elements can be encoded using bit_width.
+//! For each block, choose a `bit_width`, such that 90% of the block elements can be encoded using `bit_width`.
 //! Those elements can be stored in the primary buffer. 
-//! For elements that dont fit, store the lower `bit_width` bits in the primary buffer, encode and store the excess bits separately (Fibonacci encoding)
+//! For elements that don't fit, store the lower `bit_width` bits in the primary buffer, encode and store the excess bits separately (Fibonacci encoding)
 //! 
 //! # Note
 //! * The decoder is written in such a way that it doesn't *consume* the compressed data.
@@ -34,19 +34,18 @@
 //! assert_eq!(compressed_data.len(), bits_processed); // the entire bitstream was consumed
 //! ```
 //! 
-//! # Memory layout
-//! 
+//! # Memory layout of a NewPFD block:
 //! Header: 
 //! - fib([b_bits, min_element, #exceptions])
 //! - Exceptions
 //! - exception indices (delta encoded)
 //! 
 //! Body:
-//! - |b_bits|b_bits|b_bits|b_bits|b_bits|b_bits|...|
+//! - `|b_bits|b_bits|b_bits|b_bits|b_bits|b_bits|...|`
 //! 
 //! # Performance
 //! The library is currently *NOT* optimized for performance! 
-//! I'm using some code from the fibonacci_codec crate to have efficient encoding/decoding of int-streams.
+//! I'm using some code from the [fibonacci_codec] crate to have efficient encoding/decoding of int-streams.
 //! 
 //! However, here's what we get in terms of encoding and decoding 1Mio 1byte integers (0..255):
 //! ```bash,no_run     

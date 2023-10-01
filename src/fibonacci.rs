@@ -250,7 +250,7 @@ pub fn fib_enc_multiple_fast(data: &[u64]) -> MyBitVector{
 
 #[derive(Debug, PartialEq)]
 
-/// Hijacked from https://github.com/antifuchs/fibonacci_codec
+/// Hijacked from <https://github.com/antifuchs/fibonacci_codec>
 pub enum EncodeError<T>
 where
     T: Debug + Send + Sync + 'static,
@@ -265,7 +265,7 @@ where
     Underflow(T),
 }
 /// slightly faster fibonacci endocing (2x faster), taken from 
-/// https://github.com/antifuchs/fibonacci_codec
+/// <https://github.com/antifuchs/fibonacci_codec>
 #[inline]
 pub fn bits_from_table<T>(
     n: T,
