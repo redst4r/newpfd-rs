@@ -22,6 +22,8 @@ bit-vec="0.6"  # TODO: remove this old depenency
 rand = "0.8"
 rand_distr = "0.4.3"
 num = "0.4"
+funty="2"
+once_cell = "1.18.0"
 
 [dev-dependencies]
 criterion = "0.5"

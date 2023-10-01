@@ -203,16 +203,15 @@ fn fast_decode_vs_regular(c: &mut Criterion){
     // );
 
 
-    fn dummy_fast_iter(data_fast: &BitSlice<u8, Msb0>, table: &LookupU16Vec) -> Vec<u64> {
-        let f = FastFibonacciDecoder::new(data_fast.clone(), table, false);
+    fn dummy_fast_iter(data_fast: &BitSlice<u8, Msb0>) -> Vec<u64> {
+        let f = FastFibonacciDecoder::new(data_fast.clone(), false);
         let x: Vec<_> = f.collect();
         x
     }
 
-    let table = LookupU16Vec::new();
     c.bench_function(
         &format!("fast u16vec Iterator"),
-        |b| b.iter(||dummy_fast_iter(black_box(&data_fast.clone()), black_box(&table)))
+        |b| b.iter(||dummy_fast_iter(black_box(&data_fast.clone())))
     );
  
 

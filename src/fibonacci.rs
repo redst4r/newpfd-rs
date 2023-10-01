@@ -145,7 +145,6 @@ pub fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
 
 ///
 pub trait FbDec<'a>: Iterator<Item=u64> {
-
     /// Returns the buffer behind the last bit processed.
     /// Comes handy when the buffer contains data OTHER than fibonacci encoded 
     /// data that needs to be processed externally.
@@ -153,7 +152,6 @@ pub trait FbDec<'a>: Iterator<Item=u64> {
 
     /// how far did we process into the buffer (pretty much the first bit after a 11).
     fn get_bits_processed(&self) -> usize;
-
 }
 
 /// Decoder for Fibonacci encoded integer sequences
@@ -184,8 +182,8 @@ impl <'a> FibonacciDecoder<'a> {
     pub fn new(buffer: &'a MyBitSlice, shifted_by_one: bool) -> Self {
         FibonacciDecoder { buffer, current_pos:0, shifted_by_one}
     }
-
 }
+
 impl <'a> FbDec<'a> for FibonacciDecoder<'a> {
     /// Returns the buffer behind the last bit processed.
     /// Comes handy when the buffer contains data OTHER than fibonacci encoded 

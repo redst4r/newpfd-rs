@@ -1,14 +1,22 @@
 # NewPFD-rs
 
-Rust library implementing the [NewPFD](https://dl.acm.org/doi/10.1145/1526709.1526764) integer compression/decompression algorithm. It's currently lacking optimization for speed, but it's decently fast: 
-- Encoding: 150ms/ 1M integers
+Rust library implementing the [NewPFD](https://dl.acm.org/doi/10.1145/1526709.1526764) integer compression/decompression algorithm. 
+
+## Performance
+It's currently lacking optimization for speed, but it's decently fast: 
+- Encoding: 90ms/ 1M integers
 - Decoding: 20ms/ 1M integers
 
 See benchmarks for details.
 
+### Fibonacci encoding/decoding
 Fibonacci encoding/decoding is up to speed with other rust implementations, e.g. fibonnaci_codec crate (which I took some code from):
-- Fibonacci encoding: 182ms/ 1M integers  (fibonnaci_codec: 170ms)
-- Fibonacci encoding: 160ms/ 1M integers  (fibonnaci_codec: 140ms)
+- Fibonacci encoding: 155ms/ 1M integers  (fibonnaci_codec: 160ms)
+- Fibonacci decoding: 113ms/ 1M integers  (fibonnaci_codec: 140ms)
+
+Additionally, we implemented **fast fibonacci decoding**, which is typically 2x faster than the regular fibonacci decoding:
+- Fast Fibonacci decoding: 55ms/ 1M integers
+
 
 ## Examples
 For more examples, see the rust-docs.

@@ -21,20 +21,25 @@ use bitvec::{vec::BitVec, field::BitField, view::BitView};
 use itertools::Itertools;
 use num::traits::Pow;
 use bitvec::prelude::*;
-use crate::{fibonacci::FIB64, fib_utils::fibonacci_left_shift};
+use crate::{fibonacci::{FIB64, FbDec}, fib_utils::fibonacci_left_shift};
 use std::cmp;
 
 type FFBitorder = Msb0;
 
 // the type of bitstream we expect as input!
 type FFBitslice = BitSlice<u8, FFBitorder>;
-type FFBitvec = BitVec<u8, FFBitorder>;
+use once_cell::sync::Lazy;
+
+pub (crate) static FB_LOOKUP: Lazy<LookupU8Vec> = Lazy::new(|| {
+    println!("initializing fibnoacci lookup");
+    LookupU8Vec::new()
+});
 
 /// rr
 pub struct FastFibonacciDecoder<'a>  {
     bistream: &'a FFBitslice, // bitstream to decode
     position: usize,
-    lookup_table: &'a LookupU16Vec,
+    lookup_table: &'a LookupU8Vec,
     segment_size: usize,
     current_buffer: VecDeque<Option<u64>>,     // decoded numbers not yet emitted
     current_backtrack: VecDeque<Option<usize>>,  // for each decoded number in current_buffer, remember how many bits its encoding was
@@ -49,14 +54,14 @@ pub struct FastFibonacciDecoder<'a>  {
 }
 impl <'a>  FastFibonacciDecoder<'a>  {
     ///
-    pub fn new(bistream: &'a FFBitslice, lookup_table: &'a LookupU16Vec, shifted_by_one: bool) -> Self {
+    pub fn new(bistream: &'a FFBitslice, shifted_by_one: bool) -> Self {
         FastFibonacciDecoder {
             bistream,
             position: 0,
-            lookup_table,
+            lookup_table: &FB_LOOKUP,
             current_buffer: VecDeque::new(),
             current_backtrack: VecDeque::new(),
-            segment_size: u16::BITS as usize,
+            segment_size: u8::BITS as usize,
             state: State(0),
             decoding_state: DecodingState::new(),
             last_emission_last_position: None,
@@ -86,7 +91,7 @@ impl <'a>  FastFibonacciDecoder<'a>  {
         // decode this segment
         // NOTE: WE NEED TO PAD segments chunks that are smaller than segment_size ON THE RIGHT!!
         // this here pads depedingin on BitOrder: Lsb: right padding; Msb: left padding
-        let mut segment_u16 = segment.load_be::<u16>();
+        let mut segment_int = segment.load_be::<u8>();
 
         // to be generic over bitorder, we better do the padding ourselves!
         // turns out we can just do that with bitshifts on the integer
@@ -99,10 +104,10 @@ impl <'a>  FastFibonacciDecoder<'a>  {
         // 1001101100|000000
         // no need to do anything!
         if segment.len() < self.segment_size {
-            segment_u16 =  segment_u16 << (self.segment_size - segment.len());
+            segment_int =  segment_int << (self.segment_size - segment.len());
         }        
     
-        let (newstate, result) = self.lookup_table.lookup(self.state, segment_u16);
+        let (newstate, result) = self.lookup_table.lookup(self.state, segment_int);
         self.state = newstate;   
         self.decoding_state.update(result);
 
@@ -140,7 +145,7 @@ impl <'a> FbDec<'a> for FastFibonacciDecoder<'a> {
     fn get_remaining_buffer(&self) -> &'a FFBitslice{
         match self.last_emission_last_position {
             Some(pos) =>  &self.bistream[pos+1..],
-            None => &self.bistream  // no single element was emitted, hence no bits of the stream affected
+            None => self.bistream  // no single element was emitted, hence no bits of the stream affected
         }
     }
 
@@ -203,8 +208,7 @@ mod test_iter {
         let bits = bits![u8, FFBitorder; 
             1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,
             0,1,1,1,0,0,1,0].to_bitvec();
-        let table= LookupU16Vec::new();
-        let f = FastFibonacciDecoder::new(&bits, &table, false);
+        let f = FastFibonacciDecoder::new(&bits, false);
 
         let x = f.collect::<Vec<_>>();
         assert_eq!(x, vec![4,7, 86]);
@@ -212,13 +216,12 @@ mod test_iter {
 
     #[test]
     fn test_iter_multiple_segments() {
-        let table= LookupU16Vec::new();
 
         // what if not a single number is decoded per segment
         let bits = bits![u8, FFBitorder; 
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
             0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0].to_bitvec();
-        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        let mut f = FastFibonacciDecoder::new(&bits, false);
 
         // let x = f.collect::<Vec<_>>();
         assert_eq!(f.next(), Some(4181));
@@ -228,7 +231,7 @@ mod test_iter {
         let bits = bits![u8, FFBitorder; 
             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
             1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0].to_bitvec();
-        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        let mut f = FastFibonacciDecoder::new(&bits, false);
 
         // let x = f.collect::<Vec<_>>();
         assert_eq!(f.next(), Some(1597));
@@ -243,9 +246,8 @@ mod test_iter {
             1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,  // 4, 7, 86
             0,1,1,1,0,0,1,1,0,1,1,1,0,0,1,1  // 3, 2, 4
         ].to_bitvec();
-        let table= LookupU16Vec::new();
 
-        let f = FastFibonacciDecoder::new(&bits, &table, false);
+        let f = FastFibonacciDecoder::new(&bits, false);
 
         let x = f.collect::<Vec<_>>();
         assert_eq!(x, vec![4,7, 86, 6,2 ,6]);
@@ -256,27 +258,26 @@ mod test_iter {
         let bits = bits![u8, FFBitorder; 
             1,0,1,1,0,1,0,1,1,0,1,0,0,1,0,1,
             0,1,1,1,0,0,1,0].to_bitvec();
-        let table= LookupU16Vec::new();
         
-        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        let mut f = FastFibonacciDecoder::new(&bits, false);
         assert_eq!(f.next(), Some(4));
         assert_eq!(f.get_bits_processed(), 4);
         assert_eq!(f.get_remaining_buffer(), &bits[4..]);
 
-        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        let mut f = FastFibonacciDecoder::new(&bits, false);
         assert_eq!(f.next(), Some(4));
         assert_eq!(f.next(), Some(7));
         assert_eq!(f.get_bits_processed(), 9);
         assert_eq!(f.get_remaining_buffer(), &bits[9..]);
 
-        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        let mut f = FastFibonacciDecoder::new(&bits, false);
         assert_eq!(f.next(), Some(4));
         assert_eq!(f.next(), Some(7));
         assert_eq!(f.next(), Some(86));
         assert_eq!(f.get_bits_processed(), 19);
         assert_eq!(f.get_remaining_buffer(), &bits[19..]);
 
-        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        let mut f = FastFibonacciDecoder::new(&bits, false);
         assert_eq!(f.next(), Some(4));
         assert_eq!(f.next(), Some(7));
         assert_eq!(f.next(), Some(86));
@@ -291,9 +292,8 @@ mod test_iter {
         let bits = bits![u8, FFBitorder; 
         1,0,0,1,0,1,0,0,1,0,1,0,0,1,0,1,
         0,1,0,1,0,0,1,0].to_bitvec();
-        let table= LookupU16Vec::new();
         
-        let mut f = FastFibonacciDecoder::new(&bits, &table, false);
+        let mut f = FastFibonacciDecoder::new(&bits, false);
         assert_eq!(f.next(), None);
         assert_eq!(f.get_bits_processed(), 0);
         assert_eq!(f.get_remaining_buffer(), &bits);
@@ -311,10 +311,8 @@ mod test_iter {
         }
         let dec = FibonacciDecoder::new(&b, false);
         let x1: Vec<_> = dec.collect();
-
-        let table= LookupU16Vec::new();
         
-        let f = FastFibonacciDecoder::new(&b_fast, &table, false);
+        let f = FastFibonacciDecoder::new(&b_fast, false);
         let x2: Vec<_> = f.collect();
 
         // println!("{:?}", bitstream_to_string(&b_fast));
@@ -901,8 +899,7 @@ mod testing_fast_decode {
 
 
         // let x2 = fast_decode(b_fast.clone(), 8);
-        let table = LookupU16Vec::new();
-        let f = FastFibonacciDecoder::new(&b_fast, &table, false);
+        let f = FastFibonacciDecoder::new(&b_fast, false);
         println!("{}", f.sum::<u64>())
 
     }

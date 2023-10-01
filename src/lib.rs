@@ -51,7 +51,7 @@
 //! However, here's what we get in terms of encoding and decoding 1Mio 1byte integers (0..255):
 //! ```bash,no_run     
 //! mean +/- std
-//! Encoding: [139.52 ms 139.99 ms 140.62 ms]
+//! Encoding: [87.819 ms 88.334 ms 88.882 ms]
 //! Decoding: [15.956 ms 16.057 ms 16.199 ms]
 //! ```
 //! Decoding seems to be vastly faster!
