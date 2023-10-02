@@ -43,10 +43,14 @@ use bitvec::prelude::*;
 use crate::{fibonacci::{FIB64, FbDec}, fib_utils::fibonacci_left_shift};
 use std::cmp;
 
-type FFBitorder = Msb0;
+pub (crate) type FFBitorder = Msb0;
 
 // the type of bitstream we expect as input!
 type FFBitslice = BitSlice<u8, FFBitorder>;
+pub (crate) type FFBitvec = BitVec<u8, FFBitorder>;
+
+
+
 use once_cell::sync::Lazy;
 
 pub (crate) static FB_LOOKUP: Lazy<LookupU8Vec> = Lazy::new(|| {

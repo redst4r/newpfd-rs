@@ -6,7 +6,7 @@ use newpfd::fib_utils::random_fibonacci_stream;
 use newpfd::fibonacci::{bits_from_table, FibonacciDecoder, bitslice_to_fibonacci, bitslice_to_fibonacci2, bitslice_to_fibonacci3, bitslice_to_fibonacci4};
 use newpfd::fibonacci_fast::{fast_decode_u8, fast_decode_u16, LookupU8Vec, LookupU16Vec, FastFibonacciDecoder};
 use newpfd::fibonacci_old::fib_enc_multiple;
-use newpfd::newpfd_bitvec::NewPDFDecoderFastFib;
+use newpfd::newpfd_bitvec::decode_fast;
 use newpfd::{newpfd_bitvec::{encode, decode}, fibonacci::FIB64};
 use rand::distributions::{Distribution, Uniform};
 use rand_distr::Geometric;
@@ -54,9 +54,8 @@ fn newpfd_encode_decode(c: &mut Criterion){
     // decoding eith fast fib
     fn _dummy_decode_fast(data: MyBitVector, n_elements: usize) -> Vec<u64>{
 
-        let decoder = NewPDFDecoderFastFib::new();
         let blocksize = 512;
-        let enc = decoder.decode(&data, n_elements, blocksize);
+        let enc = decode_fast(&data, n_elements, blocksize);
         enc.0
     }
 
@@ -66,9 +65,6 @@ fn newpfd_encode_decode(c: &mut Criterion){
         &format!("Fast NewPFD: Decoding {} elements", n),
         |b| b.iter(|| _dummy_decode_fast(black_box(enc.clone()), len))
     );
-
-    
-
 }
 
 #[allow(dead_code)]

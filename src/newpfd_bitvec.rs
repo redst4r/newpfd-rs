@@ -3,7 +3,7 @@
 
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
-use crate::{fibonacci::{self, fib_enc_multiple_fast, FbDec}, fibonacci_fast::{LookupU16Vec, FastFibonacciDecoder}};
+use crate::{fibonacci::{self, fib_enc_multiple_fast, FbDec}, fibonacci_fast::FastFibonacciDecoder};
 use crate::{MyBitSlice, MyBitVector};
 
 /// round an integer to the next bigger multiple
@@ -22,169 +22,6 @@ struct NewPFDParams {
     b_bits: usize,
     min_element: u64
 }
-
-/// NewPFD decoding, internally using a FastFibonacci Decoder.
-/// 
-/// Since the FastFibonacci decoder has some overhead instanciating, we need to store
-/// it in the struct do be able to reuse the same one in multiple newPFD blocks
-/// 
-pub struct NewPDFDecoderFastFib{
-}
-impl NewPDFDecoderFastFib{
-
-    ///
-    pub fn new() -> Self {
-        NewPDFDecoderFastFib {               }
-    }
-    /// 
-    pub fn decode(&self, newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize) {
-        let mut pos = 0;
-        let mut elements: Vec<u64> = Vec::with_capacity(n_elements);
-        while elements.len() < n_elements {
-            // each call shortens the encoded BitVec
-            let current_block = &newpfd_buf[pos..];
-            let (els, bits_consumed) = self.decode_newpfdblock(current_block, blocksize);
-    
-            pos+= bits_consumed;
-    
-            for el in els {
-                elements.push(el);
-            }
-        }
-        // trucate, as we retrieved a bunch of zeros from the last block
-        elements.truncate(n_elements);
-    
-        (elements, pos)
-    }
-
-    /// Decoding a block of NewPFD from a BitVec containing a series of blocks
-    /// 
-    /// This pops off the front of the BitVec, removing the block from the stream
-    /// 
-    /// 1. decode (Fibbonacci) metadata+expeptions+gaps
-    /// 2. Decode `blocksize` elements (each of sizeb_bits)
-    /// 3. aseemble the whole thing, filling in expecrionts etc
-    /// 
-    /// We need to know the blocksize, otherwise we'd start decoding the header of 
-    /// the next block
-    /// 
-    /// # NOte:
-    /// The bitvector x gets changed in this function. Oddly that has weird effects on this 
-    /// variable outside the function (before return the x.len()=9, outside the function it is suddenly 3)
-    /// Hence we return the remainder explicitly
-    fn decode_newpfdblock(&self, buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
-
-        let mut buf_position = 0;
-        // let mut fibdec = fibonacci::FibonacciDecoder::new(buf,true);
-
-        let mut fibdec = FastFibonacciDecoder::new(buf, true);
-
-
-        // pulling the elements out of the header (b_bits, min_el, n_exceptions)
-        // let b_bits = fibdec.next().unwrap() as usize;
-        // let min_el = fibdec.next().unwrap();
-        // let n_exceptions = fibdec.next().unwrap();
-
-        let (_b_bits, min_el, n_exceptions) = fibdec.by_ref().take(3).next_tuple().unwrap(); //TODO yield a protocolError if we cant get 3 elements
-        let b_bits = _b_bits as usize;
-        
-        // let xyz: Vec<u64> = fibdec2.by_ref().take(3).collect();
-        // assert_eq!(xyz, vec![b_bits as u64, min_el, n_exceptions]);
-
-        // decoding the Gaps
-        // let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
-        // for _ in 0..n_exceptions { 
-        //     let ix =  fibdec.next().unwrap();
-        //     index_gaps.push(ix);
-        // }
-        let index_gaps: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).collect();
-        assert_eq!(index_gaps.len(), n_exceptions as usize, "protocol error, not enough exceptions");
-
-        // let index_gaps2: Vec<u64> = fibdec2.by_ref().take(n_exceptions as usize).collect();
-        // assert_eq!(index_gaps, index_gaps2, "index gaps mismatch");
-
-
-        // Decoding expections
-        // let mut exceptions = Vec::with_capacity(n_exceptions as usize);
-        // for _ in 0..n_exceptions { 
-        //     let ex = fibdec.next().unwrap();
-        //     exceptions.push(ex+1);  //undoing the shift applyied by the decoder; apparently the exceptions are NOT shifhted
-        // }
-
-        let exceptions: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).map(|x|x+1).collect();
-        assert_eq!(exceptions.len(), n_exceptions as usize, "protocol error, not enough exceptions");
-
-        // let exceptions2: Vec<u64> = fibdec2.by_ref().take(n_exceptions as usize).map(|x|x+1).collect();
-        // assert_eq!(exceptions, exceptions2, "exceptions mismatch");
-
-        // turn index gaps into the actual index (of expections)
-        let index: Vec<u64> = index_gaps
-            .into_iter()
-            .scan(0, |acc, i| {
-                *acc += i;
-                Some(*acc)
-            })
-            .collect();
-
-        // need to remove trailing 0s which where used to pad to a muitple of 32
-        let delta_bits = fibdec.get_bits_processed();
-        let padded_bits =  round_to_multiple(delta_bits, 32) - delta_bits;
-        assert!(!buf[buf_position+delta_bits..buf_position + delta_bits + padded_bits].any());
-        
-        // move the new buffer position at the end
-        buf_position = buf_position + delta_bits + padded_bits;
-
-        // the body of the block, i.e. bitpacked integers
-        let buf_body = &buf[buf_position..];
-
-        
-        // note that a block can be shorter than sepcifiec if we ran out of elements
-        // however, as currently implements (by bustools)
-        // the primary block always has blocksize*b_bits bitsize!
-        // i.e. for a partial block, we cant really know how many elements are in there
-        // (they might all be 0)
-        // hence lets get the predefined size of the primary blokc:
-        let mut body_pos = 0;
-
-        // we need to hget the primary_buffer into Msb Order (required!!)
-        // NOTE THAT CONVERSION IS VERY SLOW!!! I.e. MSB->LSB copy takes much longer than a MSB->MSB copy
-        // i.e. dont do the following; but rather have everything work with Msb
-        //
-        // let mut buf_body_full: bv::BitVec<u8, bv::Msb0> = bv::BitVec::with_capacity(blocksize*b_bits);
-        // buf_body_full.extend_from_bitslice(&buf[buf_position..buf_position+(blocksize*b_bits)]);
-
-        // maybe a swap?
-        // buf_body_full.swap_with_bitslice(buf_body);
-
-
-        let mut decoded_primary: Vec<u64> = Vec::with_capacity(blocksize);
-
-        // TODO: move this code into PrimaryBuffer
-        for _ in 0..blocksize {
-            // split off an element into x
-            let bits = &buf_body[body_pos..body_pos+b_bits];
-
-            body_pos += b_bits;
-            decoded_primary.push(PrimaryBuffer::decode_primary_buf_element(bits));
-        }
-
-        // puzzle it together: at the locations of exceptions, increment the decoded values
-        for (i, highest_bits) in izip!(index, exceptions) {
-            let lowest_bits = decoded_primary[i as usize];
-            let el = (highest_bits << b_bits) | lowest_bits;
-            let pos = i as usize;
-            decoded_primary[pos] = el;
-        }
-
-        //shift up againsty min_element
-        let decoded_final: Vec<u64> = decoded_primary.iter().map(|x|x+min_el).collect();
-
-        // println!("n_exceptions: {n_exceptions}");
-
-        (decoded_final, buf_position+body_pos)
-    }    
-}
-
 
 /// Decode a NewPFD-encoded buffer, containing `n_elements`. 
 /// Due to limitations of the format, we can't know (internally) how many elements were stored, 
@@ -214,17 +51,31 @@ impl NewPDFDecoderFastFib{
 /// assert_eq!(data, decoded);
 /// assert_eq!(encoded.len(), bits_processed);
 /// ``` 
-/// 
 pub fn decode(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
+    decode_general(newpfd_buf, n_elements, blocksize, FibDecodeMode::Normal)
+}
+
+/// Decode a NewPFD-encoded buffer, containing `n_elements`. Alias for [decode], see its documentation
+pub fn decode_normal(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
+    decode_general(newpfd_buf, n_elements, blocksize, FibDecodeMode::Normal)
+}
+
+/// Decode a NewPFD-encoded buffer, containing `n_elements`. Uses a FastFibonacci Decoder in the background
+pub fn decode_fast(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
+    decode_general(newpfd_buf, n_elements, blocksize, FibDecodeMode::Fast)
+}
+
+// decode a NewPFD block, either with a regular Fibonacci Decoder (`mode=FibDecodeMode::Normal`) or the Fast Fibonacci Decode (FibDecodeMode::Fast)
+fn decode_general(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize, mode: FibDecodeMode) -> (Vec<u64>, usize){
 
     let mut pos = 0;
     let mut elements: Vec<u64> = Vec::with_capacity(n_elements);
     while elements.len() < n_elements {
         // each call shortens the encoded BitVec
         let current_block = &newpfd_buf[pos..];
-        let (els, bits_consumed) = decode_newpfdblock(current_block, blocksize);
+        let (els, bits_consumed) = decode_newpfdblock(current_block, blocksize, mode);
 
-        pos+= bits_consumed;
+        pos += bits_consumed;
 
         for el in els {
             elements.push(el);
@@ -235,6 +86,142 @@ pub fn decode(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (
 
     (elements, pos)
 }
+
+/// Just a workaround to be able to specify which Fibonacci decoder to use
+#[derive(Copy, Clone, Debug)]
+enum FibDecodeMode {
+    Normal,
+    Fast,
+}
+
+/// Decoding a block of NewPFD from a BitVec containing a series of blocks
+/// 
+/// This pops off the front of the BitVec, removing the block from the stream
+/// 
+/// 1. decode (Fibbonacci) metadata+expeptions+gaps
+/// 2. Decode `blocksize` elements (each of sizeb_bits)
+/// 3. aseemble the whole thing, filling in expecrionts etc
+/// 
+/// We need to know the blocksize, otherwise we'd start decoding the header of 
+/// the next block
+/// 
+/// # NOte:
+/// The bitvector x gets changed in this function. Oddly that has weird effects on this 
+/// variable outside the function (before return the x.len()=9, outside the function it is suddenly 3)
+/// Hence we return the remainder explicitly
+fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize, mode:FibDecodeMode) -> (Vec<u64>, usize) {
+
+    let mut buf_position = 0;
+
+    let mut fibdec:  Box<dyn FbDec> = match mode{
+        FibDecodeMode::Fast =>   Box::new(FastFibonacciDecoder::new(buf, true)),
+        FibDecodeMode::Normal => Box::new(fibonacci::FibonacciDecoder::new(buf,true)),
+    };
+
+    // let mut fibdec = FastFibonacciDecoder::new(buf, true);
+    // let mut fibdec = fibonacci::FibonacciDecoder::new(buf,true);
+
+    // pulling the elements out of the header (b_bits, min_el, n_exceptions)
+    // let b_bits = fibdec.next().unwrap() as usize;
+    // let min_el = fibdec.next().unwrap();
+    // let n_exceptions = fibdec.next().unwrap();
+
+    let (_b_bits, min_el, n_exceptions) = fibdec.by_ref().take(3).next_tuple().unwrap(); //TODO yield a protocolError if we cant get 3 elements
+    let b_bits = _b_bits as usize;
+    
+    // let xyz: Vec<u64> = fibdec2.by_ref().take(3).collect();
+    // assert_eq!(xyz, vec![b_bits as u64, min_el, n_exceptions]);
+
+    // decoding the Gaps
+    // let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
+    // for _ in 0..n_exceptions { 
+    //     let ix =  fibdec.next().unwrap();
+    //     index_gaps.push(ix);
+    // }
+    let index_gaps: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).collect();
+    assert_eq!(index_gaps.len(), n_exceptions as usize, "protocol error, not enough exceptions");
+
+    // let index_gaps2: Vec<u64> = fibdec2.by_ref().take(n_exceptions as usize).collect();
+    // assert_eq!(index_gaps, index_gaps2, "index gaps mismatch");
+
+
+    // Decoding expections
+    // let mut exceptions = Vec::with_capacity(n_exceptions as usize);
+    // for _ in 0..n_exceptions { 
+    //     let ex = fibdec.next().unwrap();
+    //     exceptions.push(ex+1);  //undoing the shift applyied by the decoder; apparently the exceptions are NOT shifhted
+    // }
+
+    let exceptions: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).map(|x|x+1).collect();
+    assert_eq!(exceptions.len(), n_exceptions as usize, "protocol error, not enough exceptions");
+
+    // let exceptions2: Vec<u64> = fibdec2.by_ref().take(n_exceptions as usize).map(|x|x+1).collect();
+    // assert_eq!(exceptions, exceptions2, "exceptions mismatch");
+
+    // turn index gaps into the actual index (of expections)
+    let index: Vec<u64> = index_gaps
+        .into_iter()
+        .scan(0, |acc, i| {
+            *acc += i;
+            Some(*acc)
+        })
+        .collect();
+
+    // need to remove trailing 0s which where used to pad to a muitple of 32
+    let delta_bits = fibdec.get_bits_processed();
+    let padded_bits =  round_to_multiple(delta_bits, 32) - delta_bits;
+    assert!(!buf[buf_position+delta_bits..buf_position + delta_bits + padded_bits].any());
+    
+    // move the new buffer position at the end
+    buf_position = buf_position + delta_bits + padded_bits;
+
+    // the body of the block, i.e. bitpacked integers
+    let buf_body = &buf[buf_position..];
+
+    
+    // note that a block can be shorter than sepcifiec if we ran out of elements
+    // however, as currently implements (by bustools)
+    // the primary block always has blocksize*b_bits bitsize!
+    // i.e. for a partial block, we cant really know how many elements are in there
+    // (they might all be 0)
+    // hence lets get the predefined size of the primary blokc:
+    let mut body_pos = 0;
+
+    // we need to hget the primary_buffer into Msb Order (required!!)
+    // NOTE THAT CONVERSION IS VERY SLOW!!! I.e. MSB->LSB copy takes much longer than a MSB->MSB copy
+    // i.e. dont do the following; but rather have everything work with Msb
+    //
+    // let mut buf_body_full: bv::BitVec<u8, bv::Msb0> = bv::BitVec::with_capacity(blocksize*b_bits);
+    // buf_body_full.extend_from_bitslice(&buf[buf_position..buf_position+(blocksize*b_bits)]);
+
+    // maybe a swap?
+    // buf_body_full.swap_with_bitslice(buf_body);
+
+
+    let mut decoded_primary: Vec<u64> = Vec::with_capacity(blocksize);
+
+    // TODO: move this code into PrimaryBuffer
+    for _ in 0..blocksize {
+        // split off an element into x
+        let bits = &buf_body[body_pos..body_pos+b_bits];
+
+        body_pos += b_bits;
+        decoded_primary.push(PrimaryBuffer::decode_primary_buf_element(bits));
+    }
+
+    // puzzle it together: at the locations of exceptions, increment the decoded values
+    for (i, highest_bits) in izip!(index, exceptions) {
+        let lowest_bits = decoded_primary[i as usize];
+        let el = (highest_bits << b_bits) | lowest_bits;
+        let pos = i as usize;
+        decoded_primary[pos] = el;
+    }
+
+    //shift up againsty min_element
+    let decoded_final: Vec<u64> = decoded_primary.iter().map(|x|x+min_el).collect();
+    (decoded_final, buf_position+body_pos)
+}
+
 
 /// encode data using NewPFD, 
 /// 
@@ -528,123 +515,11 @@ fn min_and_clone(x: &[u64]) -> (u64, Vec<u64>) {
     (the_min, theclone)
 }
 
-/// Decoding a block of NewPFD from a BitVec containing a series of blocks
-/// 
-/// This pops off the front of the BitVec, removing the block from the stream
-/// 
-/// 1. decode (Fibbonacci) metadata+expeptions+gaps
-/// 2. Decode `blocksize` elements (each of sizeb_bits)
-/// 3. aseemble the whole thing, filling in expecrionts etc
-/// 
-/// We need to know the blocksize, otherwise we'd start decoding the header of 
-/// the next block
-/// 
-/// # NOte:
-/// The bitvector x gets changed in this function. Oddly that has weird effects on this 
-/// variable outside the function (before return the x.len()=9, outside the function it is suddenly 3)
-/// Hence we return the remainder explicitly
-fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize) -> (Vec<u64>, usize) {
-
-    let mut buf_position = 0;
-    let mut fibdec = fibonacci::FibonacciDecoder::new(buf,true);
-    // pulling the elements out of the header (b_bits, min_el, n_exceptions)
-    // let b_bits = fibdec.next().unwrap() as usize;
-    // let min_el = fibdec.next().unwrap();
-    // let n_exceptions = fibdec.next().unwrap();
-
-    let (_b_bits, min_el, n_exceptions) = fibdec.by_ref().take(3).next_tuple().unwrap(); //TODO yield a protocolError if we cant get 3 elements
-    let b_bits = _b_bits as usize;
-    
-
-    // decoding the Gaps
-    // let mut index_gaps = Vec::with_capacity(n_exceptions as usize);
-    // for _ in 0..n_exceptions { 
-    //     let ix =  fibdec.next().unwrap();
-    //     index_gaps.push(ix);
-    // }
-    let index_gaps: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).collect();
-    assert_eq!(index_gaps.len(), n_exceptions as usize, "protocol error, not enough exceptions");
-
-
-    // Decoding expections
-    // let mut exceptions = Vec::with_capacity(n_exceptions as usize);
-    // for _ in 0..n_exceptions { 
-    //     let ex = fibdec.next().unwrap();
-    //     exceptions.push(ex+1);  //undoing the shift applyied by the decoder; apparently the exceptions are NOT shifhted
-    // }
-
-    let exceptions: Vec<u64> = fibdec.by_ref().take(n_exceptions as usize).map(|x|x+1).collect();
-    assert_eq!(exceptions.len(), n_exceptions as usize, "protocol error, not enough exceptions");
-
-
-    // turn index gaps into the actual index (of expections)
-    let index: Vec<u64> = index_gaps
-        .into_iter()
-        .scan(0, |acc, i| {
-            *acc += i;
-            Some(*acc)
-        })
-        .collect();
-
-    // need to remove trailing 0s which where used to pad to a muitple of 32
-    let delta_bits = fibdec.get_bits_processed();
-    let padded_bits =  round_to_multiple(delta_bits, 32) - delta_bits;
-    assert!(!buf[buf_position+delta_bits..buf_position + delta_bits + padded_bits].any());
-    
-    // move the new buffer position at the end
-    buf_position = buf_position + delta_bits + padded_bits;
-
-    // the body of the block, i.e. bitpacked integers
-    let buf_body = &buf[buf_position..];
-
-    
-    // note that a block can be shorter than sepcifiec if we ran out of elements
-    // however, as currently implements (by bustools)
-    // the primary block always has blocksize*b_bits bitsize!
-    // i.e. for a partial block, we cant really know how many elements are in there
-    // (they might all be 0)
-    // hence lets get the predefined size of the primary blokc:
-    let mut body_pos = 0;
-
-    // we need to hget the primary_buffer into Msb Order (required!!)
-    // NOTE THAT CONVERSION IS VERY SLOW!!! I.e. MSB->LSB copy takes much longer than a MSB->MSB copy
-    // i.e. dont do the following; but rather have everything work with Msb
-    //
-    // let mut buf_body_full: bv::BitVec<u8, bv::Msb0> = bv::BitVec::with_capacity(blocksize*b_bits);
-    // buf_body_full.extend_from_bitslice(&buf[buf_position..buf_position+(blocksize*b_bits)]);
-
-    // maybe a swap?
-    // buf_body_full.swap_with_bitslice(buf_body);
-
-
-    let mut decoded_primary: Vec<u64> = Vec::with_capacity(blocksize);
-
-    // TODO: move this code into PrimaryBuffer
-    for _ in 0..blocksize {
-        // split off an element into x
-        let bits = &buf_body[body_pos..body_pos+b_bits];
-
-        body_pos += b_bits;
-        decoded_primary.push(PrimaryBuffer::decode_primary_buf_element(bits));
-    }
-
-    // puzzle it together: at the locations of exceptions, increment the decoded values
-    for (i, highest_bits) in izip!(index, exceptions) {
-        let lowest_bits = decoded_primary[i as usize];
-        let el = (highest_bits << b_bits) | lowest_bits;
-        let pos = i as usize;
-        decoded_primary[pos] = el;
-    }
-
-    //shift up againsty min_element
-    let decoded_final: Vec<u64> = decoded_primary.iter().map(|x|x+min_el).collect();
-    (decoded_final, buf_position+body_pos)
-}
 
 
 #[cfg(test)]
 mod test {
-    use rand::{distributions::{Uniform}, prelude::Distribution};
+    use rand::prelude::Distribution;
     use rand_distr::Geometric;
     use super::*;
     #[test]
@@ -705,7 +580,7 @@ mod test {
 
         let encoded_bv: MyBitVector = bv::BitVec::from_iter(encoded.iter());
 
-        let (decoded,_) = crate::newpfd_bitvec::decode_newpfdblock(encoded_bv.as_bitslice(), blocksize);
+        let (decoded,_) = crate::newpfd_bitvec::decode_newpfdblock(encoded_bv.as_bitslice(), blocksize, FibDecodeMode::Normal);
 
         //problem here: we dont know how many elements in a truncated block
         // the block will always be filled up with zero elements to get to `blocksize` elements
@@ -824,7 +699,7 @@ mod test {
     }
 
     #[test]
-    fn test_encode__decode_speed() {
+    fn test_encode_decode_speed() {
         // some random data
         let n = 10_000_000;
         // let data_dist = Uniform::from(0..255);
@@ -838,8 +713,7 @@ mod test {
         let blocksize = 512;
         let (_enc, _) = encode(data.iter().cloned(), blocksize);
 
-        let dec = NewPDFDecoderFastFib::new();
-        let (decoded_data,_) = dec.decode(&_enc, n, blocksize);
+        let (decoded_data,_) = decode_fast(&_enc, n, blocksize);
 
         assert_eq!(decoded_data, data);
 
