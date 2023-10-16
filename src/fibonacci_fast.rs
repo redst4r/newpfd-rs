@@ -153,7 +153,7 @@ impl <'a>  FastFibonacciDecoder<'a>  {
         // 1001101100|000000
         // no need to do anything!
         if segment.len() < self.segment_size {
-            segment_int =  segment_int << (self.segment_size - segment.len());
+            segment_int  <<= self.segment_size - segment.len();
         }        
     
         let (newstate, result) = self.lookup_table.lookup(self.state, segment_int);
@@ -166,7 +166,7 @@ impl <'a>  FastFibonacciDecoder<'a>  {
         // todo: feels like this copy/move is unneeded, 
         // we could just pop of self.decoding_state.decoded_numbers directly when emitting for the iterator
         for el in self.decoding_state.decoded_numbers.drain(0..self.decoding_state.decoded_numbers.len()) {
-            self.current_buffer.push_back(Some(el))
+            self.current_buffer.push_back(Some(el));
         }
         // move all decoded number-starts into the emission buffer
         // no need to delete in result, gets dropped
@@ -703,7 +703,7 @@ pub fn fast_decode_u8(stream: FFBitvec, table: &impl U8Lookup) -> Vec<u64> {
         // 1001101100|000000
         // now need to do anything!
         if segment.len() < segment_size {
-            segment_u8 =  segment_u8 << (segment_size - segment.len());
+            segment_u8  <<= segment_size - segment.len();
         }
 
         let (newstate, result) = table.lookup(state, segment_u8);
@@ -752,7 +752,7 @@ pub fn fast_decode_u16(stream: FFBitvec, table: &impl U16Lookup) -> Vec<u64> {
         // 1001101100|000000
         // now need to do anything!
         if segment.len() < segment_size {
-            segment_u16 =  segment_u16 << (segment_size - segment.len());
+            segment_u16 <<= segment_size - segment.len();
         }
 
         let (newstate, result) = table.lookup(state, segment_u16);
@@ -1033,10 +1033,10 @@ impl LookupU8Vec {
 
                 // insert result based on new state
                 if lastbit {
-                    table_state1.push((newstate, r))
+                    table_state1.push((newstate, r));
                 }
                 else{
-                    table_state0.push((newstate, r))
+                    table_state0.push((newstate, r));
                 }
             }
         }
@@ -1186,10 +1186,10 @@ impl LookupU16Vec {
 
                 // insert result based on new state                 
                 if lastbit {
-                    table_state1.push((newstate, r))
+                    table_state1.push((newstate, r));
                 }
                 else{
-                    table_state0.push((newstate, r))
+                    table_state0.push((newstate, r));
                 }
             }
         }

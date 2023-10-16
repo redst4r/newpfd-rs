@@ -1,20 +1,13 @@
 //! NewPFD with bitvec backend (instead of the old, bit_vec crate)
 //! 
-
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
 use crate::{fibonacci::{self, fib_enc_multiple_fast, FbDec}, fibonacci_fast::FastFibonacciDecoder};
 use crate::{MyBitSlice, MyBitVector};
 
 /// round an integer to the next bigger multiple
-/// ```rust
-///  use newpfd::newpfd_bitvec::round_to_multiple;
-///  assert_eq!(round_to_multiple(10,10), 10);
-///  assert_eq!(round_to_multiple(11,10), 20);
-///  assert_eq!(round_to_multiple(6,5), 10);
-/// ```
-pub fn round_to_multiple(i: usize, multiple: usize) -> usize {
-    ((i+multiple-1)/multiple)*multiple
+fn round_to_multiple(i: usize, multiple: usize) -> usize {
+    i.next_multiple_of(multiple)  // rust 1.73
 }
 
 #[derive(Debug)]
@@ -233,6 +226,7 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize, mode:FibDecodeMode) ->
 /// # Returns
 /// * a BitVec containing the NewPFD encoded data
 /// * the number of elements that were encoded (size of the input iterator)
+///
 /// # Example
 /// ```rust
 /// # use bitvec::prelude as bv;

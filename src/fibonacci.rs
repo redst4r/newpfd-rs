@@ -4,15 +4,14 @@
 //! 
 //! # Usage
 //! ```rust
-//! use newpfd::fibonacci::{fib_enc_multiple_fast,FibonacciDecoder, bitslice_to_fibonacci};
+//! use newpfd::fibonacci::{fib_enc_multiple_fast,FibonacciDecoder};
 //! let encode = fib_enc_multiple_fast(&vec![34, 12]) ;
 //! 
+//! // 2nd argument: shift all values by -1 (in case we wanted to encode 0 in the fibonacci encoding)
 //! let f = FibonacciDecoder::new(&encode, false);
 //! assert_eq!(f.collect::<Vec<_>>(), vec![34,12])
 //! ```
 
-
-// use bitvec::prelude::*;
 use itertools::izip;
 use std::fmt::Debug;
 use num::CheckedSub;
@@ -21,8 +20,6 @@ use num::CheckedSub;
 /// independent of the choice of BitOrder, i.e.
 /// both Lsb0 and Msb0 work the same way!
 use crate::{MyBitSlice, MyBitVector};
-
-
 
 
 /// Iterative fibonacci.
@@ -66,7 +63,7 @@ pub const FIB64: &[u64]= &[1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377,
 
 /// convert a bitslice holding a single fibbonacci encoding into the numerical representation.
 /// Essentially assumes that the bitslice ends with ....11 and has no other occurance of 11
-pub fn bitslice_to_fibonacci(b: &MyBitSlice) -> u64{
+fn bitslice_to_fibonacci(b: &MyBitSlice) -> u64{
     // omits the initial 1, i.e.
     // fib = [1,2,3,5,...]
     // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
@@ -86,7 +83,7 @@ pub fn bitslice_to_fibonacci(b: &MyBitSlice) -> u64{
 }
 
 /// 
-pub fn bitslice_to_fibonacci3(b: &MyBitSlice) -> u64{
+fn bitslice_to_fibonacci3(b: &MyBitSlice) -> u64{
     // omits the initial 1, i.e.
     // fib = [1,2,3,5,...]
     // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
@@ -105,7 +102,7 @@ pub fn bitslice_to_fibonacci3(b: &MyBitSlice) -> u64{
 }
 
 /// 
-pub fn bitslice_to_fibonacci2(b: &MyBitSlice) -> u64{
+fn bitslice_to_fibonacci2(b: &MyBitSlice) -> u64{
     // omits the initial 1, i.e.
     // fib = [1,2,3,5,...]
     // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
@@ -123,7 +120,7 @@ pub fn bitslice_to_fibonacci2(b: &MyBitSlice) -> u64{
 }
 
 /// 
-pub fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
+fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
     // omits the initial 1, i.e.
     // fib = [1,2,3,5,...]
     // let fib: Vec<_> = iterative_fibonacci().take(b.len() - 1).collect(); // shorten by one as we omit the final bit
@@ -143,7 +140,9 @@ pub fn bitslice_to_fibonacci4(b: &MyBitSlice) -> u64{
     sum
 }
 
-///
+/// Marker trait for Fibonacci decoders. 
+/// This is an iterator over u64 (the decoded integers), 
+/// and lets you return parts of the buffer not yet decoded
 pub trait FbDec<'a>: Iterator<Item=u64> {
     /// Returns the buffer behind the last bit processed.
     /// Comes handy when the buffer contains data OTHER than fibonacci encoded 

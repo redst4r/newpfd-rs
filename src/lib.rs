@@ -60,7 +60,12 @@ pub mod newpfd_bitvec;
 pub mod fibonacci;
 pub mod fibonacci_fast;
 pub mod fibonacci_old;
-pub mod fib_utils;
+mod fib_utils;
+
+pub use fib_utils::random_fibonacci_stream;
+// pub mod bitvec_testing;
+// pub mod fast_fib_generic;
+
 
 // not sure what the significance of those settings is
 // in busz, converting byte buffers to BitSlices seems to require u8;Msb01
@@ -90,7 +95,7 @@ pub mod fib_utils;
 ///    Pretty much the inverse of 1) 
 /// Now, what we just have to make sure is that the coder and decoder write/read in a consistent fashion.
 /// 
-/// ACtaully, we can decouple the BitVec type used in PrimaryBuffer from everythin else!!
+/// Actually, we can decouple the BitVec type used in PrimaryBuffer from everythin else!!
 /// The whole rest of the crate is agnostic of BitOrder, any integers are encoded as Fibonacci anyways
 /// 
 /// Turns out that in theory, we can decouple the Msb-required Primary buffer from the rest, but at a 
@@ -98,12 +103,12 @@ pub mod fib_utils;
 /// 
 /// Also, there's a few places where the BitOrder actually matters in FastFibonacci,
 /// e.g. turning an incoming bitstream-segment into an integer for lookup in FastFibonacciDecoder::load_segment()
-/// or the analogous funtions for the non iterators (fast_decode_u8() etc)
+/// or the analogous funtions for the non iterators (`fast_decode_u8()` etc)
 /// 
 use bitvec::prelude as bv;
 
 /// The type of bitvector used in the crate.
 /// Importantly, some code *relies* on `Msb0`
 pub (crate) type MyBitSlice = bv::BitSlice<u8, bv::Msb0>;
-/// reftype thqt goes with [MyBitSlice]
+/// reftype thqt goes with [`MyBitSlice`]
 pub (crate) type MyBitVector = bv::BitVec<u8, bv::Msb0>;

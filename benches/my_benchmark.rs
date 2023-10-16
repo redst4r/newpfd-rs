@@ -2,8 +2,9 @@ use bitvec::slice::BitSlice;
 use bitvec::{vec::BitVec, prelude::Msb0, prelude::Lsb0};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use fibonacci_codec::Encode;
-use newpfd::fib_utils::random_fibonacci_stream;
-use newpfd::fibonacci::{bits_from_table, FibonacciDecoder, bitslice_to_fibonacci, bitslice_to_fibonacci2, bitslice_to_fibonacci3, bitslice_to_fibonacci4};
+use newpfd::random_fibonacci_stream;
+use newpfd::fibonacci::{bits_from_table, FibonacciDecoder};
+// use newpfd::fibonacci::{bitslice_to_fibonacci, bitslice_to_fibonacci2, bitslice_to_fibonacci3, bitslice_to_fibonacci4};
 use newpfd::fibonacci_fast::{fast_decode_u8, fast_decode_u16, LookupU8Vec, LookupU16Vec, FastFibonacciDecoder};
 use newpfd::fibonacci_old::fib_enc_multiple;
 use newpfd::newpfd_bitvec::decode_fast;
@@ -111,30 +112,30 @@ fn fibonacci_encode(c: &mut Criterion){
 }
 
 
-fn fibonacci_bitslice(c: &mut Criterion){
-    // let v: Vec<bool> = vec![1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1].iter().map(|x|*x==1).collect();
-    let v: Vec<bool> = vec![1,0,1,0,1,0,1,1].iter().map(|x|*x==1).collect();
-    let bs: MyBitVector  = BitVec::from_iter(v.into_iter());
+// fn fibonacci_bitslice(c: &mut Criterion){
+//     // let v: Vec<bool> = vec![1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1].iter().map(|x|*x==1).collect();
+//     let v: Vec<bool> = vec![1,0,1,0,1,0,1,1].iter().map(|x|*x==1).collect();
+//     let bs: MyBitVector  = BitVec::from_iter(v.into_iter());
 
-    c.bench_function(
-        &format!("fib_bitslice"),
-        |b| b.iter(|| bitslice_to_fibonacci(black_box(&bs)))
-    );
+//     c.bench_function(
+//         &format!("fib_bitslice"),
+//         |b| b.iter(|| bitslice_to_fibonacci(black_box(&bs)))
+//     );
 
-    c.bench_function(
-        &format!("fib_bitslice2"),
-        |b| b.iter(|| bitslice_to_fibonacci2(black_box(&bs)))
-    );
+//     c.bench_function(
+//         &format!("fib_bitslice2"),
+//         |b| b.iter(|| bitslice_to_fibonacci2(black_box(&bs)))
+//     );
 
-    c.bench_function(
-        &format!("fib_bitslice3"),
-        |b| b.iter(|| bitslice_to_fibonacci3(black_box(&bs)))
-    );
-    c.bench_function(
-        &format!("fib_bitslice4"),
-        |b| b.iter(|| bitslice_to_fibonacci4(black_box(&bs)))
-    );
-}
+//     c.bench_function(
+//         &format!("fib_bitslice3"),
+//         |b| b.iter(|| bitslice_to_fibonacci3(black_box(&bs)))
+//     );
+//     c.bench_function(
+//         &format!("fib_bitslice4"),
+//         |b| b.iter(|| bitslice_to_fibonacci4(black_box(&bs)))
+//     );
+// }
 
 fn fibonacci_decode(c: &mut Criterion){
 

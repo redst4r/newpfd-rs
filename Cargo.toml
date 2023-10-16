@@ -1,7 +1,8 @@
 [package]
 name = "newpfd"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
+rust-version = "1.73"
 license = " GPL-3.0-or-later"
 description = "NewPFD integer compression/decompression"
 homepage = "https://github.com/redst4r/newpfd-rs"
@@ -12,22 +13,19 @@ readme = "README.md"
 include = ["/src", "README.md"]
 
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 bitvec="1"
 itertools="0.11"
 fibonacci_codec="0.2" # TODO: remove this old depenency
 bit-vec="0.6"  # TODO: remove this old depenency
 rand = "0.8"
-rand_distr = "0.4.3"
 num = "0.4"
-funty="2"
 once_cell = "1.18.0"
 
 [dev-dependencies]
 criterion = "0.5"
 pretty_assertions = "1"
+rand_distr = "0.4.3"
 
 [[bench]]
 name = "my_benchmark"

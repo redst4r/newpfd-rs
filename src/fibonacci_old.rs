@@ -26,7 +26,7 @@ pub fn fib_enc(mut n: u64) -> MyBitVector{
         if n == 0 { //otherwise the i-1 might cause underflow
             break
         }
-        i -= 1
+        i -= 1;
     }
     let max_ix = indices[0];
 
