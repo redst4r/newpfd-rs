@@ -45,7 +45,7 @@
 //! 
 //! # Performance
 //! The library is currently *NOT* optimized for performance! 
-//! I'm using some code from the [fibonacci_codec] crate to have efficient encoding/decoding of int-streams.
+//! I'm using some code from the [fastfibonacci] crate to have efficient encoding/decoding of int-streams.
 //! 
 //! However, here's what we get in terms of encoding and decoding 1Mio 1byte integers (0..255):
 //! ```bash,no_run     
@@ -57,14 +57,6 @@
 //! 
 #![deny(missing_docs)]
 pub mod newpfd_bitvec;
-pub mod fibonacci;
-pub mod fibonacci_fast;
-pub mod fibonacci_old;
-mod fib_utils;
-
-pub use fib_utils::random_fibonacci_stream;
-// pub mod bitvec_testing;
-// pub mod fast_fib_generic;
 
 
 // not sure what the significance of those settings is

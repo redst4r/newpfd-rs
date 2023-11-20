@@ -2,7 +2,7 @@
 //! 
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
-use crate::{fibonacci::{self, fib_enc_multiple_fast, FbDec}, fibonacci_fast::FastFibonacciDecoder};
+use fastfibonacci::{fibonacci, FbDec, fibonacci_fast::FastFibonacciDecoder};
 use crate::{MyBitSlice, MyBitVector};
 
 /// round an integer to the next bigger multiple
@@ -480,7 +480,7 @@ impl NewPFDBlock {
         to_encode.extend(self.index_gaps.iter().map(|x| x+1)); //shifting the gaps +1
         to_encode.extend(self.exceptions.iter());
 
-        let mut header= fib_enc_multiple_fast(&to_encode);
+        let mut header= fibonacci::encode(&to_encode);
 
         // yet again, this needs to be a mutliple of 32
         let to_pad =  round_to_multiple(header.len(), 32) - header.len();
