@@ -1,13 +1,13 @@
 [package]
 name = "newpfd"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.73"
 license = " GPL-3.0-or-later"
 description = "NewPFD integer compression/decompression"
 homepage = "https://github.com/redst4r/newpfd-rs"
 repository = "https://github.com/redst4r/newpfd-rs"
-keywords = ["integer-compression", "NewPFD", "PForDelta", "encoding", "fibonacci"]
+keywords = ["integer-compression", "NewPFD", "PForDelta", "encoding"]
 categories = ["Compression", "Algorithms"]
 readme = "README.md"
 include = ["/src", "README.md"]
@@ -16,8 +16,7 @@ include = ["/src", "README.md"]
 [dependencies]
 bitvec="1"
 itertools="0.12"
-bit-vec="0.6"  # TODO: remove this old depenency
-fastfibonacci="0.1.0"
+fastfibonacci="0.3.0"
 
 [dev-dependencies]
 rand = "0.8"

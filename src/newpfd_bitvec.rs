@@ -2,7 +2,7 @@
 //! 
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
-use fastfibonacci::{fibonacci, FbDec, fibonacci_fast::FastFibonacciDecoder};
+use fastfibonacci::{fibonacci, FbDec};
 use crate::{MyBitSlice, MyBitVector};
 
 /// round an integer to the next bigger multiple
@@ -53,12 +53,18 @@ pub fn decode_normal(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usiz
     decode_general(newpfd_buf, n_elements, blocksize, FibDecodeMode::Normal)
 }
 
-/// Decode a NewPFD-encoded buffer, containing `n_elements`. Uses a FastFibonacci Decoder in the background
-pub fn decode_fast(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
-    decode_general(newpfd_buf, n_elements, blocksize, FibDecodeMode::Fast)
+/// Decode a NewPFD-encoded buffer, containing `n_elements`. Uses a `FastFibonacci<u8>` Decoder in the background. See [`decode`].
+pub fn decode_fast_u8(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
+    decode_general(newpfd_buf, n_elements, blocksize, FibDecodeMode::FastU8)
 }
 
-// decode a NewPFD block, either with a regular Fibonacci Decoder (`mode=FibDecodeMode::Normal`) or the Fast Fibonacci Decode (FibDecodeMode::Fast)
+/// Decode a NewPFD-encoded buffer, containing `n_elements`. Uses a `FastFibonacci<u16>` Decoder in the background. See [`decode`].
+pub fn decode_fast_u16(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize) -> (Vec<u64>, usize){
+    decode_general(newpfd_buf, n_elements, blocksize, FibDecodeMode::FastU16)
+}
+
+/// decode a NewPFD block, either with a regular Fibonacci Decoder (`mode=FibDecodeMode::Normal`) 
+/// or the Fast Fibonacci Decode (FibDecodeMode::FastU8, FibDecodeMode::FastU16)
 fn decode_general(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize, mode: FibDecodeMode) -> (Vec<u64>, usize){
 
     let mut pos = 0;
@@ -84,7 +90,8 @@ fn decode_general(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize, 
 #[derive(Copy, Clone, Debug)]
 enum FibDecodeMode {
     Normal,
-    Fast,
+    FastU8,
+    FastU16,
 }
 
 /// Decoding a block of NewPFD from a BitVec containing a series of blocks
@@ -107,7 +114,8 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize, mode:FibDecodeMode) ->
     let mut buf_position = 0;
 
     let mut fibdec:  Box<dyn FbDec> = match mode{
-        FibDecodeMode::Fast =>   Box::new(FastFibonacciDecoder::new(buf, true)),
+        FibDecodeMode::FastU8 =>   Box::new(fastfibonacci::fast::get_u8_decoder(buf, true)),
+        FibDecodeMode::FastU16 =>   Box::new(fastfibonacci::fast::get_u16_decoder(buf, true)),
         FibDecodeMode::Normal => Box::new(fibonacci::FibonacciDecoder::new(buf,true)),
     };
 
@@ -707,8 +715,7 @@ mod test {
         let blocksize = 512;
         let (_enc, _) = encode(data.iter().cloned(), blocksize);
 
-        let (decoded_data,_) = decode_fast(&_enc, n, blocksize);
-
+        let (decoded_data,_) = decode_fast_u8(&_enc, n, blocksize);
         assert_eq!(decoded_data, data);
 
 

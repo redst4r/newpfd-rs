@@ -1,7 +1,7 @@
-use bitvec::{vec::BitVec, prelude::Msb0, prelude::Lsb0};
+use bitvec::{vec::BitVec, prelude::Msb0};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 // use newpfd::fibonacci::{bitslice_to_fibonacci, bitslice_to_fibonacci2, bitslice_to_fibonacci3, bitslice_to_fibonacci4};
-use newpfd::newpfd_bitvec::decode_fast;
+use newpfd::newpfd_bitvec::{decode_fast_u8, decode_fast_u16};
 use newpfd::newpfd_bitvec::{encode, decode};
 use rand::distributions::{Distribution, Uniform};
 use rand_distr::Geometric;
@@ -47,19 +47,32 @@ fn newpfd_encode_decode(c: &mut Criterion){
     );
 
     // decoding eith fast fib
-    fn _dummy_decode_fast(data: MyBitVector, n_elements: usize) -> Vec<u64>{
-
+    fn _dummy_decode_fast_u8(data: MyBitVector, n_elements: usize) -> Vec<u64>{
         let blocksize = 512;
-        let enc = decode_fast(&data, n_elements, blocksize);
+        let enc = decode_fast_u8(&data, n_elements, blocksize);
+        enc.0
+    }
+
+    let len = data.len();
+    let (enc, _) = encode(data.iter().cloned(), 512);
+    c.bench_function(
+        &format!("Fast-u8 NewPFD: Decoding {} elements", n),
+        |b| b.iter(|| _dummy_decode_fast_u8(black_box(enc.clone()), len))
+    );
+
+    fn _dummy_decode_fast_u16(data: MyBitVector, n_elements: usize) -> Vec<u64>{
+        let blocksize = 512;
+        let enc = decode_fast_u16(&data, n_elements, blocksize);
         enc.0
     }
 
     let len = data.len();
     let (enc, _) = encode(data.into_iter(), 512);
     c.bench_function(
-        &format!("Fast NewPFD: Decoding {} elements", n),
-        |b| b.iter(|| _dummy_decode_fast(black_box(enc.clone()), len))
+        &format!("Fast-u16 NewPFD: Decoding {} elements", n),
+        |b| b.iter(|| _dummy_decode_fast_u16(black_box(enc.clone()), len))
     );
+
 }
 
 

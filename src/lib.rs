@@ -18,6 +18,10 @@
 //! 
 //! * This compression **does not** use delta compression internally. If you need that, apply it before feeding the data into `encode()`.
 //! 
+//! * There's multiple decoders (all equivalent, but different performance): [`decode`] uses regular Fibonacci decoding (for the exceptions), 
+//!   [`decode_fast_u8`] and [`decode_fast_u16`] use FastFibonacci decoding, which in theory should be faster (2x). 
+//!   However, Fibonacci decoding is not the bottleneck of NewPFD, and FastFibonacci doesn't have much gain.
+//! 
 //! # Example
 //! ```rust
 //! // Encode some data using NewPFD
@@ -57,7 +61,7 @@
 //! 
 #![deny(missing_docs)]
 pub mod newpfd_bitvec;
-
+pub use newpfd_bitvec::{encode, decode, decode_fast_u8, decode_fast_u16};
 
 // not sure what the significance of those settings is
 // in busz, converting byte buffers to BitSlices seems to require u8;Msb01
