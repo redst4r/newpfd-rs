@@ -2,7 +2,7 @@
 name = "newpfd"
 version = "0.7.0"
 edition = "2021"
-rust-version = "1.73"
+rust-version = "1.74"
 license = " GPL-3.0-or-later"
 description = "NewPFD integer compression/decompression"
 homepage = "https://github.com/redst4r/newpfd-rs"
@@ -16,7 +16,11 @@ include = ["/src", "README.md"]
 [dependencies]
 bitvec="1"
 itertools="0.12"
-fastfibonacci="0.3.0"
+fastfibonacci="1"
+rand = "0.8"
+rand_distr = "0.4.3"
+
+# fastfibonacci= { path = "/home/michi/Dropbox/fastfibonacci", version="0.3.0" }
 
 [dev-dependencies]
 rand = "0.8"
@@ -28,3 +32,10 @@ rand_distr = "0.4.3"
 name = "my_benchmark"
 harness = false
 path = "benches/my_benchmark.rs"  # only here to make the crate publishable; otherwise cargo complains about missing bench file
+
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+# [lints.clippy]
+# pedantic = "warn"
