@@ -3,7 +3,7 @@
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
 use fastfibonacci::{fibonacci, FbDec};
-use crate::{MyBitSlice, MyBitVector};
+use crate::{MyBitSlice, MyBitStore, MyBitVector};
 
 /// round an integer to the next bigger multiple
 fn round_to_multiple(i: usize, multiple: usize) -> usize {
@@ -84,20 +84,7 @@ fn decode_general(newpfd_buf: &MyBitSlice, n_elements: usize, blocksize: usize, 
         let (mut els, bits_consumed) = decode_newpfdblock(current_block, blocksize, mode);
         
         pos += bits_consumed;
-
-        // silly, this should be directly extended
-        // for el in els {
-        //     elements.push(el);
-        // }
         elements.append(&mut els);
-
-
-        // using the bdcoder
-        // let bits_consumed = bdecoder.decode(current_block, &mut out_buffer);
-        // pos += bits_consumed;
-        // for &el in out_buffer.iter() {
-        //     elements.push(el);
-        // }
 
     }
     // trucate, as we retrieved a bunch of zeros from the last block
@@ -400,8 +387,8 @@ pub fn encode(input_stream: impl Iterator<Item=u64>, blocksize: usize) -> (MyBit
 /// **Warning** this DOES NOT check if each element fits into `b_bits`
 /// but just takes each elements lowerest `b_bits`, truncating the higher bits
 #[derive(Debug)]
-struct PrimaryBuffer {
-    buffer: bv::BitVec<u8, bv::Msb0>, // NOTE: this is HARDCODED as Msb; this is how bustools stores the primaryBuffer on disk
+pub (crate) struct PrimaryBuffer {
+    buffer: bv::BitVec<MyBitStore, bv::Msb0>, // NOTE: this is HARDCODED as Msb; this is how bustools stores the primaryBuffer on disk
     b_bits: usize,     // bits per int
     blocksize: usize,  // max number of elements that can be stored
     position: usize,   // current bitposition in the buffer
@@ -482,7 +469,7 @@ impl PrimaryBuffer {
     /// 
     /// Note that the BitOrder is HARDCODED to Msb0. This is required to be consistent with bustools.
     /// 
-    fn decode_primary_buf_element(x: &bv::BitSlice<u8, bv::Msb0>) -> u64 {
+    pub (crate) fn decode_primary_buf_element(x: &bv::BitSlice<MyBitStore, bv::Msb0>) -> u64 {
         let a:u64 = x.load_be(); // note that the result depends on the BitOrder in x
         a
     }    
