@@ -59,10 +59,10 @@
 //! ```
 //! Decoding seems to be vastly faster!
 //! 
-#![deny(missing_docs)]
 pub mod newpfd_bitvec;
 pub use newpfd_bitvec::{encode, decode, decode_fast_u8, decode_fast_u16};
 
+pub mod newpfd_u32;
 // not sure what the significance of those settings is
 // in busz, converting byte buffers to BitSlices seems to require u8;Msb01
 

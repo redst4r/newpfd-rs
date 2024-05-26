@@ -2,7 +2,7 @@
 //! 
 use bitvec::{prelude as bv, field::BitField};
 use itertools::{izip, Itertools};
-use fastfibonacci::{fibonacci, FbDec};
+use fastfibonacci::{bit_decode::fibonacci, bit_decode::FbDec};
 use crate::{MyBitSlice, MyBitStore, MyBitVector};
 
 /// round an integer to the next bigger multiple
@@ -11,7 +11,7 @@ fn round_to_multiple(i: usize, multiple: usize) -> usize {
 }
 
 #[derive(Debug)]
-struct NewPFDParams {
+pub (crate) struct NewPFDParams {
     b_bits: usize,
     min_element: u64
 }
@@ -121,8 +121,8 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize, mode:FibDecodeMode) ->
     let mut buf_position = 0;
 
     let mut fibdec:  Box<dyn FbDec> = match mode{
-        FibDecodeMode::FastU8 =>   Box::new(fastfibonacci::fast::get_u8_decoder(buf, true)),
-        FibDecodeMode::FastU16 =>   Box::new(fastfibonacci::fast::get_u16_decoder(buf, true)),
+        FibDecodeMode::FastU8 =>   Box::new(fastfibonacci::bit_decode::fast::get_u8_decoder(buf, true)),
+        FibDecodeMode::FastU16 =>   Box::new(fastfibonacci::bit_decode::fast::get_u16_decoder(buf, true)),
         FibDecodeMode::Normal => Box::new(fibonacci::FibonacciDecoder::new(buf,true)),
     };
 
@@ -193,7 +193,6 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize, mode:FibDecodeMode) ->
     // i.e. for a partial block, we cant really know how many elements are in there
     // (they might all be 0)
     // hence lets get the predefined size of the primary blokc:
-    let mut body_pos = 0;
 
     // we need to hget the primary_buffer into Msb Order (required!!)
     // NOTE THAT CONVERSION IS VERY SLOW!!! I.e. MSB->LSB copy takes much longer than a MSB->MSB copy
@@ -202,18 +201,14 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize, mode:FibDecodeMode) ->
     // let mut buf_body_full: bv::BitVec<u8, bv::Msb0> = bv::BitVec::with_capacity(blocksize*b_bits);
     // buf_body_full.extend_from_bitslice(&buf[buf_position..buf_position+(blocksize*b_bits)]);
 
-    // maybe a swap?
-    // buf_body_full.swap_with_bitslice(buf_body);
-
-
-    let mut decoded_primary: Vec<u64> = Vec::with_capacity(blocksize);
 
     // TODO: move this code into PrimaryBuffer
-    for _ in 0..blocksize {
-        // split off an element into x
-        let bits = &buf_body[body_pos..body_pos+b_bits];
 
-        body_pos += b_bits;
+    // luckily, we know how many bits are in the body: blocksize * b_bits
+    // rounded up to the next u32
+    let n_block_bytes = (blocksize * b_bits).next_multiple_of(32);
+    let mut decoded_primary: Vec<u64> = Vec::with_capacity(blocksize);
+    for bits in buf_body.chunks(b_bits).take(blocksize) {
         decoded_primary.push(PrimaryBuffer::decode_primary_buf_element(bits));
     }
 
@@ -227,13 +222,8 @@ fn decode_newpfdblock(buf: &MyBitSlice, blocksize: usize, mode:FibDecodeMode) ->
 
     //shift up againsty min_element
     let decoded_final: Vec<u64> = decoded_primary.iter().map(|x|x+min_el).collect();
-    // same as the iterator above, but avoid another allocation
-    // actually doesnt seem to matter
-    // for i in 0..decoded_primary.len(){
-    //     decoded_primary[i] += min_el;
-    // }
 
-    (decoded_final, buf_position+body_pos)
+    (decoded_final, buf_position+n_block_bytes)
 }
 
 
@@ -255,8 +245,8 @@ impl BlockDecoder {
         let mut buf_position = 0;
 
         let mut fibdec:  Box<dyn FbDec> = match self.mode{
-            FibDecodeMode::FastU8 =>   Box::new(fastfibonacci::fast::get_u8_decoder(buf, true)),
-            FibDecodeMode::FastU16 =>   Box::new(fastfibonacci::fast::get_u16_decoder(buf, true)),
+            FibDecodeMode::FastU8 =>   Box::new(fastfibonacci::bit_decode::fast::get_u8_decoder(buf, true)),
+            FibDecodeMode::FastU16 =>  Box::new(fastfibonacci::bit_decode::fast::get_u16_decoder(buf, true)),
             FibDecodeMode::Normal => Box::new(fibonacci::FibonacciDecoder::new(buf,true)),
         };
 
@@ -309,14 +299,25 @@ impl BlockDecoder {
         // buf_body_full.swap_with_bitslice(buf_body);
     
         out_buffer.fill(0);
+
         // TODO: move this code into PrimaryBuffer
-        for i in 0..self.blocksize {
-            // split off an element into x
+        // for i in 0..self.blocksize {
+        //     // split off an element into x
+        //     let bits = &buf_body[body_pos..body_pos+b_bits];
+        //     body_pos += b_bits;
+        //     out_buffer[i] = PrimaryBuffer::decode_primary_buf_element(bits);
+        // }
+
+        // modify each element of the out_buffer
+        assert!(out_buffer.len() >= self.blocksize);
+        for out_el in out_buffer.iter_mut().take(self.blocksize) {
             let bits = &buf_body[body_pos..body_pos+b_bits];
     
             body_pos += b_bits;
-            out_buffer[i] = PrimaryBuffer::decode_primary_buf_element(bits);
+            *out_el = PrimaryBuffer::decode_primary_buf_element(bits);            
         }
+
+
     
         // puzzle it together: at the locations of exceptions, increment the decoded values
         for (i, highest_bits) in izip!(index, exceptions) {
@@ -330,9 +331,9 @@ impl BlockDecoder {
         // let decoded_final: Vec<u64> = decoded_primary.iter().map(|x|x+min_el).collect();
         // same as the iterator above, but avoid another allocation
         // actually doesnt seem to matter
-        for i in 0..out_buffer.len(){
-            out_buffer[i] += min_el;
-        }
+        for el in out_buffer {
+            *el += min_el;
+        }        
     
         buf_position+body_pos
     }
@@ -469,6 +470,7 @@ impl PrimaryBuffer {
     /// 
     /// Note that the BitOrder is HARDCODED to Msb0. This is required to be consistent with bustools.
     /// 
+    #[inline]
     pub (crate) fn decode_primary_buf_element(x: &bv::BitSlice<MyBitStore, bv::Msb0>) -> u64 {
         let a:u64 = x.load_be(); // note that the result depends on the BitOrder in x
         a
@@ -490,7 +492,7 @@ impl PrimaryBuffer {
 /// Elements not fitting into `b_bits` are stored as exceptions
 /// * the `b_bits` lower bits of an exception go into the primary buffer.
 /// * the higher bits are stored after the primary buffer
-struct NewPFDBlock {
+pub (crate) struct NewPFDBlock {
     b_bits: usize,  // The number of bits each num in `pfd_block` is represented with.
     blocksize: usize, // the max number of elements to be stored; usually 512, needs to be a multiple of 32
     // primary_buffer: Vec<bv::BitVec<u8, bv::Msb0>>,
@@ -500,7 +502,7 @@ struct NewPFDBlock {
 
 impl NewPFDBlock {
     /// create `NewPDFBlock`, with bbits per interger, and a total number of elements == blocksize
-    fn new(b_bits: usize, blocksize: usize) -> Self {
+    pub fn new(b_bits: usize, blocksize: usize) -> Self {
 
         assert_eq!(blocksize % 32, 0, "Blocksize must be mutiple of 32");
         // let pb = Vec::with_capacity(blocksize);
@@ -594,6 +596,12 @@ impl NewPFDBlock {
         // 3. n_exceptions
         // 4. index_gaps
         // 5. exceptions
+        // println!("B bits {}", self.b_bits);
+        // println!("min_element {min_element}");
+        // println!("n except {}", self.exceptions.len());
+        // println!("gaps {:?}", self.index_gaps.iter().map(|x| x+1).collect_vec());
+        // println!("except {:?}", self.exceptions);
+
         let mut to_encode: Vec<u64> = vec![
             1 + self.b_bits as u64, 
             1 + min_element, 

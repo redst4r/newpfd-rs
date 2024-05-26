@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 use bitvec::{vec::BitVec, prelude::Msb0};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use fastfibonacci::byte_decode::byte_manipulation::bits_to_fibonacci_generic_array_u32;
 use newpfd::newpfd_bitvec::{decode_fast_u8, decode_fast_u16};
 use newpfd::newpfd_bitvec::{encode, decode};
 use rand::distributions::Distribution;
@@ -70,6 +71,20 @@ fn newpfd_encode_decode(c: &mut Criterion){
         |b| b.iter(|| _dummy_decode_fast_u16(black_box(&enc), len))
     );
 
+
+    // decoding eith fast fib
+    let bytes = bits_to_fibonacci_generic_array_u32(&enc);
+
+    fn _dummy_decode_fast_u8_new(bytes: &[u8], n_elements: usize) -> Vec<u64>{
+        let blocksize = 512;
+        let enc = newpfd::newpfd_u32::decode(&bytes, n_elements, blocksize);
+        enc.0
+    }
+
+    c.bench_function(
+        &format!("New Fast-u8 NewPFD: Decoding {} elements", n),
+        |b| b.iter(|| _dummy_decode_fast_u8_new(black_box(&bytes), len))
+    );
 }
 
 
